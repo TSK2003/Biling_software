@@ -11,8 +11,8 @@
     "tauri": "tauri",
     "start": "node tools/run-dev.js",
     "make-key": "cargo run --manifest-path src-tauri/Cargo.toml --bin make_usb_key --",
-    "build:exe": "tauri build --no-bundle --bin aescion-pos",
-    "build:installer": "tauri build --bin aescion-pos"
+    "build:exe": "tauri build --no-bundle",
+    "build:installer": "tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
