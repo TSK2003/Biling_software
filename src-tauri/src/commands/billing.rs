@@ -425,17 +425,20 @@ pub fn complete_bill(
     })
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ReturnBillItemPayload {
-    #[serde(rename = "billItemId")]
+    #[serde(alias = "billItemId", alias = "bill_item_id")]
     pub bill_item_id: i64,
-    #[serde(rename = "productId")]
+    #[serde(alias = "productId", alias = "product_id", default)]
     pub product_id: Option<i64>,
-    #[serde(rename = "productName")]
-    pub product_name: String,
+    #[serde(alias = "productName", alias = "product_name", default)]
+    pub product_name: Option<String>,
+    #[serde(default)]
     pub quantity: i64,
-    #[serde(rename = "unitPricePaise")]
-    pub unit_price_paise: i64,
+    #[serde(alias = "unitPricePaise", alias = "unit_price_paise", default)]
+    pub unit_price_paise: Option<i64>,
+    #[serde(alias = "lineTotalPaise", alias = "line_total_paise", default)]
+    pub line_total_paise: Option<i64>,
 }
 
 #[tauri::command]
@@ -448,10 +451,39 @@ pub fn return_bill(
     refund_amount_paise: i64,
 ) -> Result<(), String> {
     let mut db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, forward return request to Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let url = format!("http://{}:{}/api/bills/{}/return", host_ip, host_port, bill_id);
+        let payload = serde_json::json!({
+            "user_id": user_id,
+            "reason": reason.trim(),
+            "items": items,
+            "refund_amount_paise": refund_amount_paise,
+        });
+
+        let resp = client.post(&url)
+            .json(&payload)
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+
+        if !resp.status().is_success() {
+            let err_msg = resp.text().unwrap_or_else(|_| "Host failed to return bill".to_string());
+            return Err(err_msg);
+        }
+
+        return Ok(());
+    }
+
     let tx = db.conn.transaction().map_err(|e| format!("Transaction error: {}", e))?;
 
     tx.execute(
-        "UPDATE bills SET status = 'returned' WHERE id = ?1",
+        "UPDATE bills SET status = 'returned', updated_at = datetime('now') WHERE id = ?1",
         rusqlite::params![bill_id],
     ).map_err(|e| format!("Failed to update bill status: {}", e))?;
 

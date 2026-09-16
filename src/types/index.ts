@@ -304,11 +304,16 @@ export interface StockMovement {
 // Return/Refund Types
 export interface ReturnBillItem {
   bill_item_id: number;
+  billItemId?: number;
   product_id: number | null;
+  productId?: number | null;
   product_name: string;
+  productName?: string;
   quantity: number;
   unit_price_paise: number;
+  unitPricePaise?: number;
   line_total_paise: number;
+  lineTotalPaise?: number;
 }
 
 export interface ReturnBillRequest {

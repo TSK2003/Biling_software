@@ -2,7 +2,7 @@ use rusqlite::params;
 use super::connection::Database;
 
 /// Schema version tracking
-pub const CURRENT_SCHEMA_VERSION: i32 = 5;
+pub const CURRENT_SCHEMA_VERSION: i32 = 6;
 
 /// Run all database migrations
 pub fn run_migrations(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
@@ -37,6 +37,9 @@ pub fn run_migrations(db: &mut Database) -> Result<(), Box<dyn std::error::Error
     }
     if current_version < 5 {
         apply_v5(db)?;
+    }
+    if current_version < 6 {
+        apply_v6(db)?;
     }
     
     Ok(())
@@ -128,7 +131,7 @@ fn apply_v1(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
             discount_amount_paise INTEGER NOT NULL DEFAULT 0 CHECK (discount_amount_paise >= 0),
             gst_total_paise     INTEGER NOT NULL DEFAULT 0 CHECK (gst_total_paise >= 0),
             grand_total_paise   INTEGER NOT NULL CHECK (grand_total_paise >= 0),
-            status              TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'voided', 'cancelled')),
+            status              TEXT NOT NULL DEFAULT 'completed',
             void_reason         TEXT,
             voided_by_user_id   INTEGER,
             voided_at           TEXT,
@@ -664,6 +667,69 @@ fn apply_v5(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
     ")?;
     
     log::info!("Database migration v5 (Removed CHECK constraint on users.role) applied successfully");
+    Ok(())
+}
+
+/// Version 6: Rebuild bills table to remove restrictive CHECK constraint on status column (enables returned status)
+fn apply_v6(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
+    db.conn.execute_batch("
+        PRAGMA foreign_keys = OFF;
+        
+        CREATE TABLE IF NOT EXISTS bills_v6 (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            bill_uuid           TEXT NOT NULL UNIQUE,
+            bill_number         INTEGER NOT NULL,
+            business_date       TEXT NOT NULL,
+            bill_time           TEXT NOT NULL,
+            user_id             INTEGER NOT NULL,
+            subtotal_paise      INTEGER NOT NULL CHECK (subtotal_paise >= 0),
+            discount_type       TEXT NOT NULL DEFAULT 'none',
+            discount_value_x100 INTEGER NOT NULL DEFAULT 0,
+            discount_amount_paise INTEGER NOT NULL DEFAULT 0 CHECK (discount_amount_paise >= 0),
+            gst_total_paise     INTEGER NOT NULL DEFAULT 0 CHECK (gst_total_paise >= 0),
+            grand_total_paise   INTEGER NOT NULL CHECK (grand_total_paise >= 0),
+            status              TEXT NOT NULL DEFAULT 'completed',
+            void_reason         TEXT,
+            voided_by_user_id   INTEGER,
+            voided_at           TEXT,
+            import_source       TEXT,
+            import_hash         TEXT,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (voided_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+            UNIQUE(business_date, bill_number)
+        );
+        
+        INSERT OR IGNORE INTO bills_v6 (
+            id, bill_uuid, bill_number, business_date, bill_time, user_id,
+            subtotal_paise, discount_type, discount_value_x100, discount_amount_paise,
+            gst_total_paise, grand_total_paise, status, void_reason, voided_by_user_id,
+            voided_at, import_source, import_hash, created_at, updated_at
+        )
+        SELECT id, bill_uuid, bill_number, business_date, bill_time, user_id,
+               subtotal_paise, discount_type, discount_value_x100, discount_amount_paise,
+               gst_total_paise, grand_total_paise, status, void_reason, voided_by_user_id,
+               voided_at, import_source, import_hash, created_at, updated_at
+        FROM bills;
+        
+        DROP TABLE bills;
+        ALTER TABLE bills_v6 RENAME TO bills;
+        
+        CREATE INDEX IF NOT EXISTS idx_bills_date ON bills(business_date);
+        CREATE INDEX IF NOT EXISTS idx_bills_number ON bills(bill_number);
+        CREATE INDEX IF NOT EXISTS idx_bills_user ON bills(user_id);
+        CREATE INDEX IF NOT EXISTS idx_bills_status ON bills(status);
+        CREATE INDEX IF NOT EXISTS idx_bills_uuid ON bills(bill_uuid);
+        CREATE INDEX IF NOT EXISTS idx_bills_import_hash ON bills(import_hash);
+        CREATE INDEX IF NOT EXISTS idx_bills_date_number ON bills(business_date, bill_number);
+        
+        PRAGMA foreign_keys = ON;
+        
+        INSERT INTO schema_version (version) VALUES (6);
+    ")?;
+    
+    log::info!("Database migration v6 (Removed restrictive CHECK constraint on bills.status) applied successfully");
     Ok(())
 }
 

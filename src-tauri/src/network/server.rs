@@ -67,6 +67,7 @@ pub fn create_router(state: ServerState) -> Router {
         .route("/api/billing/create", post(create_bill))
         .route("/api/bills", get(get_bills_history))
         .route("/api/bills/:id/void", post(void_bill))
+        .route("/api/bills/:id/return", post(return_bill_endpoint))
         // Realtime WebSocket
         .route("/api/ws", get(ws_handler))
         .layer(cors)
@@ -609,6 +610,63 @@ async fn void_bill(
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to void bill: {}", e)))?;
 
     let _ = state.tx.send(json!({ "event": "BILL_VOIDED", "bill_id": id }).to_string());
+
+    Ok(Json(json!({ "success": true })))
+}
+
+async fn return_bill_endpoint(
+    State(state): State<ServerState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let mut db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "DB Lock error".to_string()))?;
+    let reason = payload["reason"].as_str().unwrap_or("Customer Return");
+    let user_id = payload["user_id"].as_i64().unwrap_or(1);
+    let refund_amount_paise = payload["refund_amount_paise"].as_i64().unwrap_or(0);
+
+    let tx = db.conn.transaction().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    tx.execute(
+        "UPDATE bills SET status = 'returned', updated_at = datetime('now') WHERE id = ?1",
+        rusqlite::params![id],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update bill status: {}", e)))?;
+
+    if let Some(items) = payload["items"].as_array() {
+        for item in items {
+            let pid = item["productId"].as_i64().or_else(|| item["product_id"].as_i64());
+            let qty = item["quantity"].as_i64().unwrap_or(1) as i32;
+            if let Some(product_id) = pid {
+                if product_id > 0 {
+                    let _ = tx.execute(
+                        "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes)
+                         VALUES (?1, ?2, 'return', ?3, ?4, ?5)",
+                        rusqlite::params![product_id, qty, id, user_id, reason],
+                    );
+                    let _ = tx.execute(
+                        "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
+                         ON CONFLICT(product_id) DO UPDATE SET current_stock = current_stock + ?3, updated_at = datetime('now')",
+                        rusqlite::params![product_id, qty, qty],
+                    );
+                }
+            }
+        }
+    }
+
+    let details = serde_json::json!({
+        "bill_id": id,
+        "reason": reason,
+        "refund_amount_paise": refund_amount_paise,
+    }).to_string();
+
+    let _ = tx.execute(
+        "INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json)
+         VALUES (?1, 'return_bill', 'bill', ?2, ?3)",
+        rusqlite::params![user_id, id, details],
+    );
+
+    tx.commit().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let _ = state.tx.send(json!({ "event": "BILL_RETURNED", "bill_id": id }).to_string());
 
     Ok(Json(json!({ "success": true })))
 }

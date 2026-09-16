@@ -176,11 +176,16 @@ export const BillsPage: React.FC = () => {
       .filter((item) => item.selected)
       .map((item) => ({
         bill_item_id: item.billItem.id,
+        billItemId: item.billItem.id,
         product_id: item.billItem.product_id,
+        productId: item.billItem.product_id,
         product_name: item.billItem.product_name_snapshot,
+        productName: item.billItem.product_name_snapshot,
         quantity: item.returnQty,
         unit_price_paise: item.billItem.unit_price_paise,
+        unitPricePaise: item.billItem.unit_price_paise,
         line_total_paise: item.billItem.unit_price_paise * item.returnQty,
+        lineTotalPaise: item.billItem.unit_price_paise * item.returnQty,
       }));
 
     setIsReturning(true);
