@@ -95,6 +95,7 @@ pub fn run() {
             commands::billing::load_draft,
             commands::billing::delete_draft,
             commands::billing::complete_bill,
+            commands::billing::return_bill,
             // Bill commands
             commands::bills::get_bills,
             commands::bills::get_bill_detail,

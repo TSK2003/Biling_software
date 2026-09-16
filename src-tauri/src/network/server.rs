@@ -477,6 +477,8 @@ async fn create_bill(
         };
         let _line_total = line_subtotal + line_gst;
 
+        let db_product_id: Option<i64> = if item.product_id > 0 { Some(item.product_id) } else { None };
+
         tx.execute(
             "INSERT INTO bill_items (
                 bill_id, product_id, product_code_snapshot, product_name_snapshot,
@@ -484,24 +486,26 @@ async fn create_bill(
                 gst_percentage_x100, gst_amount_paise, line_total_paise, sort_order
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
-                bill_id, item.product_id, item.product_code, item.product_name,
+                bill_id, db_product_id, item.product_code, item.product_name,
                 item.category_name, item.unit_price_paise, item.quantity,
                 item.gst_enabled as i32, item.gst_percentage_x100, line_gst,
                 line_subtotal, idx as i32,
             ],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to insert bill item: {}", e)))?;
 
-        // Deduct inventory & record stock movement
-        let _ = tx.execute(
-            "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, device_id, notes)
-             VALUES (?1, ?2, 'sale', ?3, ?4, ?5, 'POS Sale')",
-            rusqlite::params![item.product_id, -(item.quantity as i32), bill_id, payload.user_id, payload.device_id],
-        );
-        let _ = tx.execute(
-            "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
-             ON CONFLICT(product_id) DO UPDATE SET current_stock = current_stock - ?3, updated_at = datetime('now')",
-            rusqlite::params![item.product_id, -(item.quantity as i32), item.quantity as i32],
-        );
+        // Deduct inventory & record stock movement only for catalog products
+        if let Some(pid) = db_product_id {
+            let _ = tx.execute(
+                "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, device_id, notes)
+                 VALUES (?1, ?2, 'sale', ?3, ?4, ?5, 'POS Sale')",
+                rusqlite::params![pid, -(item.quantity as i32), bill_id, payload.user_id, payload.device_id],
+            );
+            let _ = tx.execute(
+                "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
+                 ON CONFLICT(product_id) DO UPDATE SET current_stock = current_stock - ?3, updated_at = datetime('now')",
+                rusqlite::params![pid, -(item.quantity as i32), item.quantity as i32],
+            );
+        }
     }
 
     let cash = payload.cash_amount_paise.unwrap_or(0);
