@@ -128,6 +128,7 @@ pub fn run() {
             // Licensing commands
             commands::licensing::check_license,
             commands::licensing::detect_usb_key,
+            commands::licensing::get_all_drives,
             commands::licensing::activate_license,
             commands::licensing::activate_with_code,
             commands::licensing::create_security_usb_key,

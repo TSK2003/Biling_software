@@ -1,7 +1,7 @@
 use std::path::Path;
 use tauri::State;
 use crate::AppState;
-use crate::models::{LicenseStatus, USBKeyInfo};
+use crate::models::{DriveInfo, LicenseStatus, USBKeyInfo};
 use crate::services::{licensing_service, usb_service};
 
 /// Check current license/activation status
@@ -19,6 +19,13 @@ pub fn detect_usb_key() -> Result<Option<USBKeyInfo>, String> {
     let info = usb_service::find_aescion_usb_key();
     Ok(info)
 }
+
+/// Get all connected drives with detection info
+#[tauri::command]
+pub fn get_all_drives() -> Result<Vec<DriveInfo>, String> {
+    Ok(usb_service::get_connected_drives())
+}
+
 
 /// Activate license using a detected USB drive
 #[tauri::command]

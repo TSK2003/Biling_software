@@ -214,6 +214,17 @@ export interface USBKeyInfo {
   message: string;
 }
 
+export interface DriveInfo {
+  letter: string;
+  label: string;
+  is_removable: boolean;
+  total_gb: number;
+  free_gb: number;
+  has_key: boolean;
+  key_info?: USBKeyInfo | null;
+}
+
+
 // Setting Types
 export interface Setting {
   key: string;

@@ -372,6 +372,18 @@ pub struct USBKeyInfo {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DriveInfo {
+    pub letter: String,
+    pub label: String,
+    pub is_removable: bool,
+    pub total_gb: f64,
+    pub free_gb: f64,
+    pub has_key: bool,
+    pub key_info: Option<USBKeyInfo>,
+}
+
+
 // ========== BACKUP ==========
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
