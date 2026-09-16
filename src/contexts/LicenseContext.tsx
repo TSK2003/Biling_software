@@ -15,7 +15,6 @@ interface LicenseContextType {
   activate: (driveLetter: string) => Promise<boolean>;
   activateWithCode: (code: string, shopName?: string) => Promise<boolean>;
   createSecurityKey: (driveLetter: string, shopName: string) => Promise<boolean>;
-  enableBrowserDevMode: () => void;
   deactivate: () => Promise<boolean>;
   isActivated: boolean;
 }
@@ -123,22 +122,8 @@ export const LicenseProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const enableBrowserDevMode = () => {
-    localStorage.setItem('dev_browser_mode', 'true');
-    setStatus({
-      state: 'ACTIVE',
-      license_id: 'BROWSER-DEV-PREVIEW',
-      shop_name: 'Billing APP (Demo Preview)',
-      license_type: 'developer',
-      activated_at: new Date().toISOString(),
-      message: 'Browser Dev Preview Mode Active',
-    });
-    toast.success('Browser Dev Mode activated! All screens unlocked.');
-  };
-
   const deactivate = async (): Promise<boolean> => {
     try {
-      localStorage.removeItem('dev_browser_mode');
       if (isTauri) {
         await api.deactivateLicense();
       }
@@ -169,7 +154,6 @@ export const LicenseProvider: React.FC<{ children: React.ReactNode }> = ({ child
         activate,
         activateWithCode,
         createSecurityKey,
-        enableBrowserDevMode,
         deactivate,
         isActivated: status?.state === 'ACTIVE',
       }}

@@ -267,28 +267,9 @@ export const api = {
     invoke<string>('execute_excel_import', { filePath }),
 
   // Licensing
-  checkLicense: async (): Promise<LicenseStatus> => {
-    if (!isTauriApp()) {
-      const devBypass = localStorage.getItem('dev_browser_mode');
-      if (devBypass === 'true') {
-        return {
-          state: 'ACTIVE',
-          license_id: 'BROWSER-DEV-PREVIEW',
-          shop_name: 'Billing APP (Demo)',
-          license_type: 'developer',
-          activated_at: new Date().toISOString(),
-          message: 'Browser Dev Preview Mode Active',
-        };
-      }
-      return {
-        state: 'ACTIVATION_REQUIRED',
-        message: 'Running in Web Browser. Launch the Desktop App via `npm start` or enable Dev Preview.',
-      };
-    }
-    return invoke<LicenseStatus>('check_license');
-  },
-  detectUsbKey: () => (isTauriApp() ? invoke<USBKeyInfo | null>('detect_usb_key') : Promise.resolve(null)),
-  getAllDrives: () => (isTauriApp() ? invoke<DriveInfo[]>('get_all_drives') : Promise.resolve([])),
+  checkLicense: () => invoke<LicenseStatus>('check_license'),
+  detectUsbKey: () => invoke<USBKeyInfo | null>('detect_usb_key'),
+  getAllDrives: () => invoke<DriveInfo[]>('get_all_drives'),
   activateLicense: (driveLetter: string) =>
     invoke<LicenseStatus>('activate_license', { driveLetter }),
   activateWithCode: (code: string, shopName?: string) =>

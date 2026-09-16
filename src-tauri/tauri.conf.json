@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AESCION POS",
+  "productName": "Billing APP",
   "version": "0.1.0",
   "identifier": "com.aescion.pos",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "AESCION POS",
+        "title": "Billing APP",
         "label": "main",
         "width": 1280,
         "height": 800,
