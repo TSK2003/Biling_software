@@ -1,0 +1,78 @@
+# ==============================================================================
+# AESCION POS — .gitignore
+# ==============================================================================
+
+# Node Dependencies & Build Output
+node_modules/
+dist/
+dist-ssr/
+build/
+.next/
+out/
+
+# Rust & Tauri Build Artifacts
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+target/
+**/*.rs.bk
+*.pdb
+*.exe
+*.msi
+*.dll
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+
+# Local SQLite Databases & Test Artifacts
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+backups/
+reports/
+*.xlsx
+*.pdf
+*.zip
+
+# Logs & Diagnostics
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# IDE & Editor Files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+
+# OS Metadata & Cache
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# Antigravity IDE & Temporary Storage
+.agents/
+.tempmediaStorage/
+.user_uploaded/
+.system_generated/

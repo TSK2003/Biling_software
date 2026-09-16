@@ -1,0 +1,371 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: #f8fafc;
+    color: #1e293b;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  /* Prevent text selection on UI elements (POS usability) */
+  button, label, .no-select {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+
+  /* Input styling */
+  input, select, textarea {
+    font-family: inherit;
+    font-size: inherit;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    ring: 2px;
+  }
+}
+
+@layer components {
+  /* Sidebar — wider with larger text */
+  .sidebar {
+    @apply w-64 bg-white border-r border-surface-200 flex flex-col h-full;
+  }
+
+  .sidebar-logo {
+    @apply px-4 py-4 border-b border-surface-200 flex items-center gap-3;
+  }
+
+  .sidebar-nav {
+    @apply flex-1 py-2 overflow-y-auto;
+  }
+
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-2.5 mx-2 rounded text-base text-surface-600 
+           hover:bg-surface-50 hover:text-surface-900 cursor-pointer transition-colors duration-150;
+  }
+
+  .sidebar-item.active {
+    @apply bg-primary-50 text-primary-700 font-semibold;
+  }
+
+  .sidebar-item svg {
+    @apply w-5 h-5 flex-shrink-0;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-white rounded-xl border border-surface-200 shadow-sm;
+  }
+
+  .card-header {
+    @apply px-4 py-3 border-b border-surface-100 flex items-center justify-between;
+  }
+
+  .card-body {
+    @apply p-4;
+  }
+
+  /* Stat cards */
+  .stat-card {
+    @apply card p-4;
+  }
+
+  .stat-card-label {
+    @apply text-sm font-medium text-surface-500 uppercase tracking-wide;
+  }
+
+  .stat-card-value {
+    @apply text-2xl font-semibold text-surface-900 mt-1;
+  }
+
+  /* Buttons — base */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 font-semibold text-sm rounded-lg 
+           transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-1 
+           disabled:opacity-50 disabled:cursor-not-allowed select-none;
+  }
+
+  .btn-primary {
+    @apply btn h-10 px-4 bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white 
+           focus:ring-primary-500 shadow-sm;
+  }
+
+  .btn-secondary {
+    @apply btn h-10 px-4 bg-white hover:bg-surface-50 active:bg-surface-100 text-surface-700 
+           border border-surface-300 focus:ring-surface-400 shadow-sm;
+  }
+
+  .btn-danger {
+    @apply btn h-10 px-4 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white 
+           focus:ring-red-500 shadow-sm;
+  }
+
+  .btn-success {
+    @apply btn h-10 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white 
+           focus:ring-emerald-500 shadow-sm;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-surface-600 border-transparent 
+           hover:bg-surface-100 active:bg-surface-200;
+  }
+
+  .btn-sm {
+    @apply h-8 px-3 text-xs rounded-md;
+  }
+
+  .btn-lg {
+    @apply h-12 px-6 text-base rounded-lg;
+  }
+
+  /* Form elements — taller and bigger text */
+  .form-group {
+    @apply flex flex-col gap-1.5;
+  }
+
+  .form-label {
+    @apply text-sm font-semibold text-surface-700 flex items-center gap-1;
+  }
+
+  .form-input {
+    @apply w-full h-10 px-3 text-sm bg-white border border-surface-300 rounded-lg 
+           focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 
+           placeholder:text-surface-400 transition-colors shadow-sm;
+  }
+
+  .form-select {
+    @apply form-input appearance-none cursor-pointer pr-8;
+  }
+
+  .form-checkbox {
+    @apply w-5 h-5 rounded border-surface-300 text-primary-600 
+           focus:ring-primary-500/20 cursor-pointer;
+  }
+
+  /* Tables — bigger text */
+  .table-container {
+    @apply overflow-x-auto w-full;
+  }
+
+  .table {
+    @apply w-full text-sm text-surface-700 border-collapse text-left;
+  }
+
+  .table thead {
+    @apply bg-surface-50/80 border-b border-surface-200;
+  }
+
+  .table th {
+    @apply px-4 py-3 text-xs font-bold text-surface-500 uppercase tracking-wider select-none;
+  }
+
+  .table td {
+    @apply px-4 py-3 border-b border-surface-100 align-middle;
+  }
+
+  .table tbody tr:hover {
+    @apply bg-surface-50/60 transition-colors;
+  }
+
+  /* Badges — bigger text */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border select-none;
+  }
+
+  .badge-success {
+    @apply bg-emerald-50 text-emerald-700 border-emerald-200;
+  }
+
+  .badge-warning {
+    @apply bg-amber-50 text-amber-700 border-amber-200;
+  }
+
+  .badge-danger {
+    @apply bg-red-50 text-red-700 border-red-200;
+  }
+
+  .badge-info {
+    @apply bg-primary-50 text-primary-700 border-primary-200;
+  }
+
+  .badge-neutral {
+    @apply bg-surface-100 text-surface-700 border-surface-200;
+  }
+
+  /* Modal */
+  .modal-backdrop {
+    @apply fixed inset-0 bg-black/40 backdrop-blur-sm z-40 flex items-center justify-center p-4;
+  }
+
+  .modal {
+    @apply bg-white rounded-xl shadow-xl border border-surface-200 
+           max-h-[90vh] overflow-hidden flex flex-col z-50;
+  }
+
+  .modal-header {
+    @apply px-6 py-4 border-b border-surface-200 flex items-center justify-between flex-shrink-0;
+  }
+
+  .modal-body {
+    @apply px-6 py-5 overflow-y-auto flex-1;
+  }
+
+  .modal-footer {
+    @apply px-6 py-3.5 border-t border-surface-100 flex items-center justify-end gap-2.5 flex-shrink-0 bg-surface-50/50;
+  }
+
+  /* Page layout */
+  .page-header {
+    @apply flex items-center justify-between px-6 py-4 border-b border-surface-200 bg-white flex-shrink-0;
+  }
+
+  .page-title {
+    @apply text-xl font-semibold text-surface-900;
+  }
+
+  .page-content {
+    @apply p-6 overflow-y-auto flex-1;
+  }
+
+  /* Product card (for billing screen) — compact */
+  .product-card {
+    @apply card p-2 cursor-pointer hover:shadow-card-hover hover:border-primary-300 
+           transition-all duration-150 active:scale-[0.98];
+  }
+
+  .product-card-image {
+    @apply w-full aspect-square rounded bg-surface-100 object-cover mb-1.5;
+  }
+
+  .product-card-name {
+    @apply text-sm font-medium text-surface-800 truncate;
+  }
+
+  .product-card-price {
+    @apply text-sm font-semibold text-primary-700;
+  }
+
+  .product-card-code {
+    @apply text-xs text-surface-400;
+  }
+
+  /* Cart item */
+  .cart-item {
+    @apply flex items-center gap-3 px-3 py-2 border-b border-surface-100 last:border-0;
+  }
+
+  /* Quantity controls — slightly bigger */
+  .qty-control {
+    @apply inline-flex items-center border border-surface-300 rounded overflow-hidden;
+  }
+
+  .qty-btn {
+    @apply w-8 h-8 flex items-center justify-center text-surface-600 
+           hover:bg-surface-100 active:bg-surface-200 transition-colors;
+  }
+
+  .qty-input {
+    @apply w-12 h-8 text-center text-sm border-x border-surface-300 
+           focus:outline-none focus:bg-primary-50;
+  }
+
+  /* Category tabs — bigger */
+  .category-tab {
+    @apply px-4 py-2 text-sm font-medium rounded-full border border-surface-200 
+           text-surface-600 hover:bg-surface-50 cursor-pointer transition-colors 
+           whitespace-nowrap;
+  }
+
+  .category-tab.active {
+    @apply bg-primary-600 text-white border-primary-600;
+  }
+
+  /* Search */
+  .search-input {
+    @apply form-input pl-9;
+  }
+
+  /* Toggle */
+  .toggle {
+    @apply relative inline-flex h-5 w-9 items-center rounded-full cursor-pointer 
+           transition-colors duration-200;
+  }
+
+  .toggle-on {
+    @apply bg-primary-600;
+  }
+
+  .toggle-off {
+    @apply bg-surface-300;
+  }
+
+  .toggle-dot {
+    @apply inline-block h-3.5 w-3.5 rounded-full bg-white transform transition-transform 
+           duration-200 shadow-sm;
+  }
+
+  /* Activation screen */
+  .activation-container {
+    @apply h-full w-full flex items-center justify-center bg-surface-50;
+  }
+
+  .activation-card {
+    @apply bg-white rounded-lg shadow-lg border border-surface-200 p-8 
+           max-w-md w-full mx-4 text-center;
+  }
+
+  /* Loading spinner */
+  .spinner {
+    @apply w-5 h-5 border-2 border-surface-300 border-t-primary-600 rounded-full animate-spin;
+  }
+
+  /* Toast / notification */
+  .toast {
+    @apply px-4 py-2.5 rounded-lg shadow-dropdown text-sm font-medium;
+  }
+}
+
+@layer utilities {
+  .currency::before {
+    content: '₹';
+  }
+}
