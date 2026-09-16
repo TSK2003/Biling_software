@@ -82,9 +82,9 @@ pub fn activate_with_code(state: State<'_, AppState>, code: String, shop_name: O
         return Err("Shop Name is required for activation".to_string());
     }
     
-    let is_valid = code_clean.starts_with("AESCION-") || code_clean.len() >= 10;
+    let is_valid = code_clean.starts_with("BILLING-") || code_clean.starts_with("AESCION-") || code_clean.len() >= 8;
     if !is_valid {
-        return Err("Invalid License Key format. Key must start with AESCION- (e.g. AESCION-PRO-2026)".to_string());
+        return Err("Invalid License Key format. Key must start with BILLING- (e.g. BILLING-PRO-2026)".to_string());
     }
 
     use crate::models::LicensePayload;
@@ -96,7 +96,7 @@ pub fn activate_with_code(state: State<'_, AppState>, code: String, shop_name: O
         features: vec!["pos".to_string(), "billing".to_string(), "reports".to_string(), "network".to_string()],
         issued_at: chrono::Utc::now().to_rfc3339(),
         expires_at: None,
-        issuer: "AESCION TECHNOLOGIES".to_string(),
+        issuer: "Billing APP".to_string(),
         schema_version: 1,
     };
 
@@ -118,7 +118,7 @@ pub fn activate_with_code(state: State<'_, AppState>, code: String, shop_name: O
     
     // Also update settings shop_name if empty
     let _ = db.conn.execute(
-        "UPDATE settings SET value = ?1 WHERE key = 'shop_name' AND (value = 'AESCION POS' OR value = 'Fruit Shop')",
+        "UPDATE settings SET value = ?1 WHERE key = 'shop_name' AND (value = 'Billing APP' OR value = 'AESCION POS' OR value = 'Fruit Shop')",
         rusqlite::params![shop],
     );
 

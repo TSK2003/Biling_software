@@ -130,7 +130,7 @@ impl ReportService {
             .set_align(FormatAlign::Right);
 
         // 1. Write Header & Metadata
-        worksheet.write_with_format(0, 0, "AESCION POS — SALES & FINANCIAL REPORT", &title_format).map_err(|e| e.to_string())?;
+        worksheet.write_with_format(0, 0, "Billing APP — SALES & FINANCIAL REPORT", &title_format).map_err(|e| e.to_string())?;
         
         let subtitle = if date_from == date_to {
             format!("Business Date: {} | Generated at: {}", date_from, chrono::Local::now().format("%d-%m-%Y %H:%M:%S"))

@@ -80,7 +80,7 @@ export const SettingsPage: React.FC = () => {
     setIsWritingUsb(true);
     try {
       const msg = await api.createSecurityUsbKey(usbDriveLetter.trim(), usbShopName.trim(), 'perpetual');
-      toast.success(msg || 'AESCION Security USB created successfully!');
+      toast.success(msg || 'Security Pen Drive created successfully!');
     } catch (err: any) {
       toast.error(typeof err === 'string' ? err : 'Failed to create Security USB key');
     } finally {
@@ -269,7 +269,7 @@ export const SettingsPage: React.FC = () => {
             }`}
           >
             <Shield className="w-3.5 h-3.5" />
-            <span>AESCION Activation</span>
+            <span>License & Security</span>
           </button>
         </div>
 
@@ -584,7 +584,7 @@ export const SettingsPage: React.FC = () => {
                 <span>Google Drive Cloud Configuration Guide:</span>
               </div>
               <p className="text-2xs text-blue-800 leading-relaxed">
-                1. Go to <b>drive.google.com</b> and create a new folder (e.g. <i>AESCION_Backups</i>).<br/>
+                1. Go to <b>drive.google.com</b> and create a new folder (e.g. <i>Billing_Backups</i>).<br/>
                 2. Right-click the folder and copy its shareable link.<br/>
                 3. Paste the link into the box above and click <b>Save Settings</b>.<br/>
                 4. Go to <b>Backup & Import</b> to trigger instant cloud uploads anytime!
@@ -660,7 +660,7 @@ export const SettingsPage: React.FC = () => {
                 <div className="p-3 rounded-lg bg-surface-50 border border-surface-200">
                   <div className="text-2xs text-surface-500 font-medium">Shop Identifier</div>
                   <div className="font-mono text-xs font-bold text-primary-700 mt-0.5 truncate">
-                    {networkInfo?.shop_id || 'SHOP-AESCION-000001'}
+                    {networkInfo?.shop_id || 'SHOP-BILLING-000001'}
                   </div>
                 </div>
 
@@ -668,7 +668,7 @@ export const SettingsPage: React.FC = () => {
                   <div>
                     <div className="text-2xs text-primary-700 font-semibold">Connection Code</div>
                     <div className="font-mono text-xs font-extrabold text-primary-900 tracking-wider mt-0.5">
-                      {networkInfo?.connection_code || 'AESCION-884920'}
+                      {networkInfo?.connection_code || 'BILLING-884920'}
                     </div>
                   </div>
                   <button
@@ -792,12 +792,12 @@ export const SettingsPage: React.FC = () => {
           </div>
         )}
 
-        {/* Tab 6: AESCION Offline Activation Status */}
+        {/* Tab 6: Offline Activation Status */}
         {activeTab === 'license' && (
           <div className="card p-5 space-y-4 bg-white">
             <h3 className="text-sm font-bold text-surface-900 border-b border-surface-100 pb-2 flex items-center gap-2">
               <Shield className="w-4 h-4 text-primary-600" />
-              <span>AESCION Security Key & Device License</span>
+              <span>Security Key & Device License</span>
             </h3>
 
             <div className="p-4 rounded-lg bg-surface-50 border border-surface-200 space-y-3">
@@ -839,7 +839,7 @@ export const SettingsPage: React.FC = () => {
                   <Usb className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-blue-950">AESCION Security Pen Drive Creator</h4>
+                  <h4 className="text-xs font-bold text-blue-950">Security Pen Drive Creator</h4>
                   <p className="text-3xs text-blue-700">Write cryptographic offline license key to any connected USB drive</p>
                 </div>
               </div>
@@ -896,7 +896,7 @@ export const SettingsPage: React.FC = () => {
               <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
               <div>
                 <b>Device Transfer Policy:</b> Deactivating this computer releases the local hardware binding.
-                To transfer this license to another computer, simply insert your AESCION Security Pen Drive into the new machine.
+                To transfer this license to another computer, simply insert your Security Pen Drive into the new machine.
               </div>
             </div>
 

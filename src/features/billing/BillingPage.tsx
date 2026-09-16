@@ -494,7 +494,7 @@ export const BillingPage: React.FC = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-8 gap-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
                 {products.map((product) => (
                   <div
                     key={product.id}
@@ -504,7 +504,7 @@ export const BillingPage: React.FC = () => {
                   >
                     <div>
                       {/* Product Image preview or initial fallback */}
-                      <div className="w-full aspect-square rounded bg-surface-100 mb-1 flex items-center justify-center text-surface-400 font-bold text-lg overflow-hidden group-hover:bg-primary-50 transition-colors">
+                      <div className="w-full aspect-[4/3] rounded-lg bg-surface-100 mb-2 flex items-center justify-center text-primary-600 font-bold text-xl overflow-hidden group-hover:bg-primary-50 transition-colors">
                         {product.image_path ? (
                           <img
                             src={product.image_path}
@@ -518,15 +518,15 @@ export const BillingPage: React.FC = () => {
                       <div className="product-card-name" title={product.name}>
                         {product.name}
                       </div>
-                      <div className="product-card-code">
+                      <div className="product-card-code" title={product.product_code}>
                         {product.product_code}
                       </div>
                     </div>
-                    <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-surface-100">
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-surface-100">
                       <span className="product-card-price">
                         {formatCurrency(product.selling_price_paise)}
                       </span>
-                      <span className="text-xs bg-surface-100 group-hover:bg-primary-600 group-hover:text-white text-surface-600 px-1.5 py-0.5 rounded font-bold transition-colors">
+                      <span className="text-2xs bg-primary-50 group-hover:bg-primary-600 group-hover:text-white text-primary-700 px-2 py-0.5 rounded font-bold transition-colors">
                         +Add
                       </span>
                     </div>

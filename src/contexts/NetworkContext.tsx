@@ -48,11 +48,11 @@ export const NetworkProvider: React.FC<{ children: ReactNode }> = ({ children })
       // Fallback default info
       setNetworkInfo({
         mode: 'host',
-        shop_id: 'SHOP-AESCION-000001',
-        shop_name: 'Fruit Shop',
+        shop_id: 'SHOP-BILLING-000001',
+        shop_name: 'Billing APP',
         host_ip: '127.0.0.1',
         host_port: 4123,
-        connection_code: 'AESCION-884920',
+        connection_code: 'BILLING-884920',
         is_server_running: true,
         device_id: 'DEV-HOST-000001',
         device_name: 'MAIN-PC',

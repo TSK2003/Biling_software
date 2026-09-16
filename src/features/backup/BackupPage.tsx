@@ -330,7 +330,7 @@ export const BackupPage: React.FC = () => {
                   <b>Step 1:</b> Open your Google Drive in any web browser (<span className="font-mono underline cursor-pointer" onClick={() => window.open('https://drive.google.com', '_blank')}>drive.google.com</span>).
                 </li>
                 <li>
-                  <b>Step 2:</b> Click <b>"+ New" &rarr; "New Folder"</b> and name it (e.g., <span className="font-mono font-bold">AESCION_Shop_Backups</span>).
+                  <b>Step 2:</b> Click <b>"+ New" &rarr; "New Folder"</b> and name it (e.g., <span className="font-mono font-bold">Billing_Shop_Backups</span>).
                 </li>
                 <li>
                   <b>Step 3:</b> Open the newly created folder, then copy its link from the browser address bar (or Right click folder &rarr; <b>Share &rarr; Copy Link</b>).

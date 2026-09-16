@@ -29,7 +29,7 @@ import type {
 // Client-Mode Helpers
 // ============================================================
 
-const CLIENT_CONFIG_KEY = 'aescion_client_config';
+const CLIENT_CONFIG_KEY = 'billing_client_config';
 
 interface ClientConfig {
   mode: 'host' | 'client';

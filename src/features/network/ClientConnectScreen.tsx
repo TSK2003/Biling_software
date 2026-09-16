@@ -312,7 +312,7 @@ export const ClientConnectScreen: React.FC<ClientConnectScreenProps> = ({
               type="text"
               value={connectionCode}
               onChange={(e) => setConnectionCode(e.target.value.toUpperCase())}
-              placeholder="e.g. AESCION-884920"
+              placeholder="e.g. BILLING-884920"
               className="form-input font-mono uppercase text-xs tracking-wider h-8"
               required
             />

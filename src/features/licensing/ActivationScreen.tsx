@@ -32,7 +32,7 @@ export const ActivationScreen: React.FC = () => {
   const [isActivating, setIsActivating] = useState(false);
   const [showClientConnect, setShowClientConnect] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
-  const [activationCode, setActivationCode] = useState('AESCION-PRO-2026');
+  const [activationCode, setActivationCode] = useState('BILLING-PRO-2026');
   const [shopNameInput, setShopNameInput] = useState('My Shop');
   const [selectedDrive, setSelectedDrive] = useState<string>('');
 
@@ -325,7 +325,7 @@ export const ActivationScreen: React.FC = () => {
                 />
                 <input
                   type="text"
-                  placeholder="e.g. AESCION-PRO-2026"
+                  placeholder="e.g. BILLING-PRO-2026"
                   value={activationCode}
                   onChange={(e) => setActivationCode(e.target.value)}
                   className="input w-full h-9 text-xs font-mono"

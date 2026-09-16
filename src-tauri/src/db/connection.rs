@@ -71,7 +71,7 @@ impl Database {
                 dirs_fallback()
             });
         
-        let path = PathBuf::from(base).join("com.aescion.pos");
+        let path = PathBuf::from(base).join("com.billing.pos");
         Ok(path)
     }
     
@@ -101,7 +101,17 @@ impl Database {
     }
     
     /// Get the path for activation data
+    /// Stored in the application installation directory so that deleting or uninstalling
+    /// the app removes the license and strictly requires the Security Pen Drive upon reinstallation!
     pub fn activation_dir(&self) -> PathBuf {
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                let app_license_dir = exe_dir.join("license");
+                if std::fs::create_dir_all(&app_license_dir).is_ok() {
+                    return app_license_dir;
+                }
+            }
+        }
         self.data_dir.join("activation")
     }
 }

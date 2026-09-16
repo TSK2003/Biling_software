@@ -116,7 +116,7 @@ pub fn check_local_activation(activation_file: &Path) -> LicenseStatus {
             activated_at: None,
             expires_at: None,
             app_version: None,
-            message: Some("Application is not activated. Please insert the AESCION Security USB.".to_string()),
+            message: Some("Application is not activated. Please insert your Security Pen Drive.".to_string()),
         };
     }
 
@@ -170,7 +170,7 @@ pub fn check_local_activation(activation_file: &Path) -> LicenseStatus {
                 activated_at: None,
                 expires_at: None,
                 app_version: None,
-                message: Some("This installation is bound to another device. Please re-activate using the AESCION Security USB.".to_string()),
+                message: Some("This installation is bound to another device. Please re-activate using your Security Pen Drive.".to_string()),
             };
         }
     };
@@ -217,7 +217,7 @@ pub fn check_local_activation(activation_file: &Path) -> LicenseStatus {
                     activated_at: Some(record.activated_at),
                     expires_at: record.expires_at,
                     app_version: Some(record.app_version),
-                    message: Some("Your license has expired. Contact AESCION for renewal.".to_string()),
+                    message: Some("Your license has expired. Please contact support for renewal.".to_string()),
                 };
             }
         }

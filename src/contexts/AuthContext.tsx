@@ -24,17 +24,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const currentUser = await api.getCurrentUser();
       if (currentUser) {
         setUser(currentUser);
-        sessionStorage.setItem('aescion_user', JSON.stringify(currentUser));
+        sessionStorage.setItem('billing_user', JSON.stringify(currentUser));
         return;
       }
-      const raw = sessionStorage.getItem('aescion_user');
+      const raw = sessionStorage.getItem('billing_user');
       if (raw) {
         setUser(JSON.parse(raw));
       } else {
         setUser(null);
       }
     } catch {
-      const raw = sessionStorage.getItem('aescion_user');
+      const raw = sessionStorage.getItem('billing_user');
       if (raw) {
         try {
           setUser(JSON.parse(raw));
@@ -57,7 +57,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await api.login(username, password);
       setUser(response.user);
-      sessionStorage.setItem('aescion_user', JSON.stringify(response.user));
+      sessionStorage.setItem('billing_user', JSON.stringify(response.user));
       toast.success(`Welcome back, ${response.user.display_name}!`);
       return true;
     } catch (err: any) {
@@ -69,11 +69,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       await api.logout();
-      sessionStorage.removeItem('aescion_user');
+      sessionStorage.removeItem('billing_user');
       setUser(null);
       toast.success('Logged out successfully');
     } catch {
-      sessionStorage.removeItem('aescion_user');
+      sessionStorage.removeItem('billing_user');
       setUser(null);
     }
   };
