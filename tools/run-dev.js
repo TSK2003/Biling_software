@@ -18,7 +18,7 @@ const env = {
   PATH: `${process.env.PATH || ''};${cargoBin}`,
 };
 
-console.log('✨ Starting AESCION POS (Multi-Computer Local Network enabled)...');
+console.log('Starting Billing APP...');
 
 const child = spawn('npx', ['tauri', 'dev'], {
   stdio: 'inherit',
