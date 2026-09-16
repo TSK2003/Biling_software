@@ -25,7 +25,11 @@ impl Database {
         fs::create_dir_all(data_dir.join("backups"))?;
         fs::create_dir_all(data_dir.join("activation"))?;
         
-        let db_path = data_dir.join("aescion_pos.db");
+        let legacy_db_path = data_dir.join("aescion_pos.db");
+        let db_path = data_dir.join("billing_software.db");
+        if !db_path.exists() && legacy_db_path.exists() {
+            let _ = fs::copy(&legacy_db_path, &db_path);
+        }
         let conn = Connection::open(&db_path)?;
         
         // Configure SQLite for reliability and performance
@@ -71,7 +75,7 @@ impl Database {
                 dirs_fallback()
             });
         
-        let path = PathBuf::from(base).join("com.billing.pos");
+        let path = PathBuf::from(base).join("com.billing.software");
         Ok(path)
     }
     

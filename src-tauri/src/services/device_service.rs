@@ -94,7 +94,7 @@ fn get_windows_fingerprint() -> String {
     }
 
     let combined = format!(
-        "AESCION-POS-HWID:{}:{}:{}:{}",
+        "BILLING-SOFTWARE-HWID:{}:{}:{}:{}",
         system_uuid, baseboard_serial, processor_id, bios_serial
     );
 
@@ -109,7 +109,7 @@ fn get_fallback_fingerprint() -> String {
         .or_else(|_| std::env::var("COMPUTERNAME"))
         .unwrap_or_else(|_| "DEV_HOST".to_string());
     
-    let combined = format!("AESCION-POS-FALLBACK:{}", hostname);
+    let combined = format!("BILLING-SOFTWARE-FALLBACK:{}", hostname);
     let mut hasher = Sha256::new();
     hasher.update(combined.as_bytes());
     format!("{:x}", hasher.finalize())

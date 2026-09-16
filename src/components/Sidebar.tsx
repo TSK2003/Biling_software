@@ -54,10 +54,7 @@ export const Sidebar: React.FC = () => {
             {shopName}
           </div>
           <div className="text-xs text-surface-500 font-medium flex items-center gap-1">
-            <span>Billing APP</span>
-            <span className="font-mono bg-primary-50 text-primary-700 px-1.5 py-0.5 rounded text-xs font-bold">
-              POS
-            </span>
+            <span>Billing Software</span>
           </div>
         </div>
       </div>

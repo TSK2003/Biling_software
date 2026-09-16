@@ -107,7 +107,7 @@ export const ActivationScreen: React.FC = () => {
         </div>
 
         <h2 className="text-2xl font-bold text-surface-900 tracking-tight mb-1">
-          {isActivated ? 'Billing APP Licensed & Active' : 'Security Pen Drive Required'}
+          {isActivated ? 'Billing Software Licensed & Active' : 'Security Pen Drive Required'}
         </h2>
         <p className="text-xs text-surface-500 mb-6">
           {isActivated
@@ -373,7 +373,7 @@ export const ActivationScreen: React.FC = () => {
         )}
 
         <div className="mt-6 pt-4 border-t border-surface-100 text-2xs text-surface-400">
-          Billing APP • Complete Hardware Cryptographic Security
+          Billing Software • Complete Hardware Cryptographic Security
         </div>
       </div>
     </div>

@@ -1,11 +1,11 @@
 use std::env;
 use std::path::Path;
-use aescion_pos_lib::services::licensing_service::write_usb_security_key;
+use billing_software_lib::services::licensing_service::write_usb_security_key;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let raw_drive = args.get(1).map(|s| s.trim()).unwrap_or(".");
-    let shop_name = args.get(2).map(|s| s.trim()).unwrap_or("Billing APP Shop");
+    let shop_name = args.get(2).map(|s| s.trim()).unwrap_or("Billing Software Shop");
 
     // Normalize Windows drive letter (e.g. "E" -> "E:\", "E:" -> "E:\", "E:\" -> "E:\")
     let normalized_drive = if raw_drive.len() == 1 && raw_drive.chars().next().unwrap().is_alphabetic() {
@@ -22,7 +22,7 @@ fn main() {
 
     let drive_path = Path::new(&normalized_drive);
     println!("=========================================================");
-    println!("  Billing APP — Hardware USB Security Key Creator");
+    println!("  Billing Software — Hardware USB Security Key Creator");
     println!("=========================================================");
     println!("Target Pen Drive : {:?}", drive_path);
     println!("Customer Shop    : {}", shop_name);
@@ -34,9 +34,9 @@ fn main() {
         Ok(msg) => {
             println!("SUCCESS: {}", msg);
             println!("---------------------------------------------------------");
-            println!("{:?}\\AESCION_KEY\\license.bin created successfully.", drive_path);
+            println!("{:?}\\BILLING_KEY\\license.bin created successfully.", drive_path);
             println!("Cryptographic signature verified and sealed with master seed.");
-            println!("Plug this USB Pen Drive into the computer and open Billing APP to activate.");
+            println!("Plug this USB Pen Drive into the computer and open Billing Software to activate.");
             println!("=========================================================");
         }
         Err(err) => {

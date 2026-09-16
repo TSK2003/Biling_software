@@ -20,8 +20,8 @@ pub fn normalize_drive_path(root: &Path) -> (String, PathBuf) {
     (normalized, path_buf)
 }
 
-/// Finds any connected USB drive that contains an AESCION/Billing security key license.bin
-pub fn find_aescion_usb_key() -> Option<USBKeyInfo> {
+/// Finds any connected USB drive that contains a Billing security key license.bin
+pub fn find_billing_usb_key() -> Option<USBKeyInfo> {
     // 1. Check all mounted disks reported by sysinfo
     let disks = Disks::new_with_refreshed_list();
     for disk in disks.list() {
@@ -48,16 +48,21 @@ pub fn find_aescion_usb_key() -> Option<USBKeyInfo> {
     None
 }
 
-/// Checks a specific root path for AESCION_KEY/license.bin or license.bin
+/// Backwards-compatible alias for find_billing_usb_key
+pub fn find_aescion_usb_key() -> Option<USBKeyInfo> {
+    find_billing_usb_key()
+}
+
+/// Checks a specific root path for BILLING_KEY/license.bin or license.bin
 pub fn check_drive_for_key(root: &Path) -> Option<USBKeyInfo> {
     let (drive_letter, base_path) = normalize_drive_path(root);
 
     // Candidates in priority order:
     let candidate_paths = [
-        base_path.join("AESCION_KEY").join("license.bin"),
-        base_path.join("aescion_key").join("license.bin"),
         base_path.join("BILLING_KEY").join("license.bin"),
         base_path.join("billing_key").join("license.bin"),
+        base_path.join("AESCION_KEY").join("license.bin"),
+        base_path.join("aescion_key").join("license.bin"),
         base_path.join("license.bin"),
     ];
 

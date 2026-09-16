@@ -438,8 +438,8 @@ fn apply_v2(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
     
     // Seed default network and shop identity settings
     let network_settings = [
-        ("shop_id", "SHOP-AESCION-000001"),
-        ("connection_code", "AESCION-884920"),
+        ("shop_id", "SHOP-BILLING-000001"),
+        ("connection_code", "BILLING-884920"),
         ("host_port", "4123"),
         ("network_mode", "host"),
         ("device_name", "MAIN-PC"),

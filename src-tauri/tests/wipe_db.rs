@@ -1,4 +1,4 @@
-use aescion_pos_lib::db::connection::Database;
+use billing_software_lib::db::connection::Database;
 
 #[test]
 fn wipe_all_database_data() {

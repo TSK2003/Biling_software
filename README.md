@@ -1,4 +1,4 @@
-# 🛒 AESCION POS — Offline Desktop Billing & Inventory System
+# 🛒 Billing Software — Offline Desktop Billing & Inventory System
 
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg)](https://tauri.app/)
 [![React 19](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
@@ -7,7 +7,7 @@
 [![SQLite](https://img.shields.io/badge/SQLite-WAL_Mode-003B57.svg)](https://sqlite.org/)
 [![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)]()
 
-**AESCION POS** is a high-performance, offline-first desktop Point of Sale (POS) and inventory management system engineered specifically for retail stores, supermarkets, fruit shops, restaurants, and wholesale counters. Built with **Tauri 2, Rust, React 19, TypeScript, and SQLite**, it provides sub-millisecond checkout speeds, hardware-bound licensing, real-time multi-computer local network synchronization, and automated Google Drive cloud backup.
+**Billing Software** is a high-performance, offline-first desktop Point of Sale (POS) and inventory management system engineered specifically for retail stores, supermarkets, fruit shops, restaurants, and wholesale counters. Built with **Tauri 2, Rust, React 19, TypeScript, and SQLite**, it provides sub-millisecond checkout speeds, hardware-bound licensing, real-time multi-computer local network synchronization, and automated Google Drive cloud backup.
 
 ---
 
@@ -57,7 +57,7 @@
 
 ## 🌐 Complete Multi-Computer & Device Connection Guide
 
-AESCION POS supports connecting multiple billing terminals, cashier counters, and manager computers over your shop's local Wi-Fi or Ethernet LAN.
+Billing Software supports connecting multiple billing terminals, cashier counters, and manager computers over your shop's local Wi-Fi or Ethernet LAN.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -83,8 +83,8 @@ AESCION POS supports connecting multiple billing terminals, cashier counters, an
 ---
 
 ### 💻 Step 1: Main Server Setup (Admin PC)
-1. Install and launch **AESCION POS** on your primary shop computer.
-2. Insert your authorized **AESCION Hardware Security USB Key** and click **Activate This Device**.
+1. Install and launch **Billing Software** on your primary shop computer.
+2. Insert your authorized **Security Pen Drive** and click **Activate This Device**.
 3. Login using default Admin credentials:
    - **Username**: `admin`
    - **Password**: `admin123`
@@ -114,22 +114,22 @@ From the Main Admin PC:
 2. Note down:
    - **Host IP Address**: e.g., `192.168.1.15`
    - **Host Port**: `4123`
-   - **Connection Code (PIN)**: e.g., `AESCION-884920` (6-character security PIN)
+   - **Connection Code (PIN)**: e.g., `BILLING-884920` (6-character security PIN)
 
 ---
 
 ### 🖥️ Step 4: Connect Secondary Computers (Cashier Terminals)
 On any additional computer connected to the same Wi-Fi / LAN:
-1. Install and open **AESCION POS**.
+1. Install and open **Billing Software**.
 2. On the first screen, click **"Connect to Main Host PC (Cashier Terminal)"**.
 3. **Connection Method A (Automatic LAN Scan - Recommended)**:
    - The app scans your local network and displays discovered Host PCs (e.g., `Fruit Shop - 192.168.1.15`).
-   - Click **Connect** and enter the **Connection Code** (`AESCION-884920`).
+   - Click **Connect** and enter the **Connection Code** (`BILLING-884920`).
 4. **Connection Method B (Manual IP Entry)**:
    - If Wi-Fi router blocks UDP broadcast, enter:
      - **Host IP**: `192.168.1.15`
      - **Port**: `4123`
-     - **Connection Code**: `AESCION-884920`
+     - **Connection Code**: `BILLING-884920`
    - Click **Test Connection** ➔ **Connect Terminal**.
 5. Once connected, the login screen will open. Cashiers can log in with their created username and password (e.g., `cashier1` / `pass123`).
 
@@ -189,8 +189,8 @@ From the Main Admin PC:
 
 ### 1. Clone & Install Dependencies
 ```powershell
-git clone https://github.com/your-username/aescion-pos.git
-cd aescion-pos
+git clone https://github.com/your-username/billing-software.git
+cd billing-software
 
 # Install frontend packages
 npm install
@@ -212,11 +212,11 @@ Compiles an optimized, standalone Windows binary for direct execution:
 ```powershell
 npm run build:exe
 ```
-*(or via CLI: `$env:Path += ";$env:USERPROFILE\.cargo\bin"; npx tauri build --no-bundle --bin aescion-pos`)*
+*(or via CLI: `$env:Path += ";$env:USERPROFILE\.cargo\bin"; npx tauri build --no-bundle`)*
 
 📍 **Output Location**:
 ```
-src-tauri/target/release/aescion-pos.exe
+src-tauri/target/release/billing-software.exe
 ```
 
 ---
@@ -227,11 +227,11 @@ Compiles a production Windows setup installer with desktop shortcuts and uninsta
 ```powershell
 npm run build:installer
 ```
-*(or via CLI: `$env:Path += ";$env:USERPROFILE\.cargo\bin"; npx tauri build --bin aescion-pos`)*
+*(or via CLI: `$env:Path += ";$env:USERPROFILE\.cargo\bin"; npx tauri build`)*
 
 📍 **Output Location**:
 ```
-src-tauri/target/release/bundle/nsis/AESCION POS_0.1.0_x64-setup.exe
+src-tauri/target/release/bundle/nsis/Billing Software_0.1.0_x64-setup.exe
 ```
 
 ---
@@ -332,5 +332,5 @@ The test automatically verifies:
 
 ## 📄 License & Distribution
 
-Copyright © 2026 AESCION Technologies. All rights reserved.  
+Copyright © 2026 Billing Software. All rights reserved.  
 This software is licensed on a per-shop basis and protected by hardware-bound licensing.

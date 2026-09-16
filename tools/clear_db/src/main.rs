@@ -4,16 +4,18 @@ use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local_app_data = std::env::var("LOCALAPPDATA")
         .unwrap_or_else(|_| "C:\\Users\\Default\\AppData\\Local".to_string());
-    let db_path = PathBuf::from(local_app_data).join("com.aescion.pos").join("aescion_pos.db");
+    let db_path = PathBuf::from(&local_app_data).join("com.billing.software").join("billing_software.db");
+    let legacy_db_path = PathBuf::from(&local_app_data).join("com.aescion.pos").join("aescion_pos.db");
+    let active_path = if db_path.exists() { db_path } else { legacy_db_path };
     
-    println!("Connecting to SQLite database at: {:?}", db_path);
+    println!("Connecting to SQLite database at: {:?}", active_path);
     
-    if !db_path.exists() {
+    if !active_path.exists() {
         println!("Database file does not exist yet.");
         return Ok(());
     }
     
-    let conn = Connection::open(&db_path)?;
+    let conn = Connection::open(&active_path)?;
     
     // Clear draft_bills, payments, bill_items, bills, products
     let drafts: usize = conn.execute("DELETE FROM draft_bills", [])?;

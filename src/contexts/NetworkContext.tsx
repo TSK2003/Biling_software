@@ -49,7 +49,7 @@ export const NetworkProvider: React.FC<{ children: ReactNode }> = ({ children })
       setNetworkInfo({
         mode: 'host',
         shop_id: 'SHOP-BILLING-000001',
-        shop_name: 'Billing APP',
+        shop_name: 'Billing Software',
         host_ip: '127.0.0.1',
         host_port: 4123,
         connection_code: 'BILLING-884920',

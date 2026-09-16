@@ -17,7 +17,7 @@ pub fn get_network_info(state: State<'_, AppState>) -> Result<NetworkInfo, Strin
         "SELECT value FROM settings WHERE key = 'shop_id'",
         [],
         |r| r.get(0),
-    ).unwrap_or_else(|_| "SHOP-AESCION-000001".to_string());
+    ).unwrap_or_else(|_| "SHOP-BILLING-000001".to_string());
 
     let shop_name: String = db.conn.query_row(
         "SELECT value FROM settings WHERE key = 'shop_name'",
@@ -29,7 +29,7 @@ pub fn get_network_info(state: State<'_, AppState>) -> Result<NetworkInfo, Strin
         "SELECT value FROM settings WHERE key = 'connection_code'",
         [],
         |r| r.get(0),
-    ).unwrap_or_else(|_| "AESCION-884920".to_string());
+    ).unwrap_or_else(|_| "BILLING-884920".to_string());
 
     let host_port: u16 = db.conn.query_row(
         "SELECT value FROM settings WHERE key = 'host_port'",

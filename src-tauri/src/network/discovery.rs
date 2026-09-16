@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::models::DiscoveredHost;
 
 const DISCOVERY_PORT: u16 = 4124;
-const DISCOVERY_MAGIC_REQ: &str = "AESCION_DISCOVER_HOST_REQ";
+const DISCOVERY_MAGIC_REQ: &str = "BILLING_DISCOVER_HOST_REQ";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HostBeacon {
@@ -43,9 +43,9 @@ pub fn start_discovery_responder(
             match socket.recv_from(&mut buf) {
                 Ok((len, src)) => {
                     let msg = String::from_utf8_lossy(&buf[..len]);
-                    if msg.contains(DISCOVERY_MAGIC_REQ) {
+                    if msg.contains(DISCOVERY_MAGIC_REQ) || msg.contains("AESCION_DISCOVER_HOST_REQ") {
                         let beacon = HostBeacon {
-                            magic: "AESCION_HOST_RESP".to_string(),
+                            magic: "BILLING_HOST_RESP".to_string(),
                             shop_id: shop_id.clone(),
                             shop_name: shop_name.clone(),
                             host_ip: host_ip.clone(),
@@ -67,7 +67,7 @@ pub fn start_discovery_responder(
     });
 }
 
-/// Client LAN sweep to discover active AESCION Host computers
+/// Client LAN sweep to discover active Host computers
 pub fn discover_hosts_on_lan(timeout_secs: u64) -> Vec<DiscoveredHost> {
     let mut discovered = Vec::new();
     
@@ -93,7 +93,7 @@ pub fn discover_hosts_on_lan(timeout_secs: u64) -> Vec<DiscoveredHost> {
         match socket.recv_from(&mut buf) {
             Ok((len, _)) => {
                 if let Ok(beacon) = serde_json::from_slice::<HostBeacon>(&buf[..len]) {
-                    if beacon.magic == "AESCION_HOST_RESP" {
+                    if beacon.magic == "BILLING_HOST_RESP" || beacon.magic == "AESCION_HOST_RESP" {
                         let host = DiscoveredHost {
                             shop_id: beacon.shop_id,
                             shop_name: beacon.shop_name,

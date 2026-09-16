@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    aescion_pos_lib::run()
+    billing_software_lib::run()
 }

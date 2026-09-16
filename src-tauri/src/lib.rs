@@ -26,7 +26,7 @@ pub fn run() {
             "SELECT value FROM settings WHERE key = 'shop_id'",
             [],
             |r| r.get(0),
-        ).unwrap_or_else(|_| "SHOP-AESCION-000001".to_string());
+        ).unwrap_or_else(|_| "SHOP-BILLING-000001".to_string());
 
         let shop_name: String = db_lock.conn.query_row(
             "SELECT value FROM settings WHERE key = 'shop_name'",

@@ -18,7 +18,7 @@ pub struct LicensePayload {
 }
 
 fn print_usage() {
-    println!("AESCION License Forge - Offline USB Security Key Generator");
+    println!("Billing Software License Forge - Offline USB Security Key Generator");
     println!("Usage:");
     println!("  keygen <output_dir>                 Generate a new Ed25519 keypair");
     println!("  create <private_key_hex> <shop_name> <output_file> [type] [expires_rfc3339]");
@@ -81,7 +81,7 @@ fn main() {
                 ],
                 issued_at: chrono::Utc::now().to_rfc3339(),
                 expires_at,
-                issuer: "AESCION POS Systems".to_string(),
+                issuer: "Billing Software Systems".to_string(),
                 schema_version: 1,
             };
 
@@ -110,10 +110,10 @@ fn main() {
             }
             let license_file = &args[2];
             let drive_path = Path::new(&args[3]);
-            let usb_id = args.get(4).map(|s| s.as_str()).unwrap_or("AESCION-USB-KEY-001");
+            let usb_id = args.get(4).map(|s| s.as_str()).unwrap_or("BILLING-USB-KEY-001");
 
-            let target_dir = drive_path.join("AESCION_KEY");
-            fs::create_dir_all(&target_dir).expect("Failed to create AESCION_KEY directory on drive");
+            let target_dir = drive_path.join("BILLING_KEY");
+            fs::create_dir_all(&target_dir).expect("Failed to create BILLING_KEY directory on drive");
 
             let target_license = target_dir.join("license.bin");
             fs::copy(license_file, &target_license).expect("Failed to copy license.bin to USB");
@@ -121,11 +121,11 @@ fn main() {
             let metadata = serde_json::json!({
                 "usb_id": usb_id,
                 "prepared_at": chrono::Utc::now().to_rfc3339(),
-                "issuer": "AESCION Security Key Preparer"
+                "issuer": "Billing Software Security Key Preparer"
             });
             fs::write(target_dir.join("usb.json"), metadata.to_string()).unwrap();
 
-            println!("✓ AESCION Security USB prepared at: {}", target_dir.display());
+            println!("✓ Billing Software Security USB prepared at: {}", target_dir.display());
             println!("  Files written: license.bin, usb.json");
         }
         "verify" => {

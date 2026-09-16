@@ -5,7 +5,7 @@ import { formatCurrency } from '../../lib/format';
 import { Modal } from '../../components/Modal';
 import { Header } from '../../components/Header';
 import { useAuth } from '../../contexts/AuthContext';
-import type { Bill, BillDetail, BillItem } from '../../types';
+import type { Bill, BillDetail, BillItem, ReturnBillItem } from '../../types';
 import toast from 'react-hot-toast';
 
 // Return item state tracker
@@ -172,20 +172,15 @@ export const BillsPage: React.FC = () => {
       return;
     }
 
-    const returnItemsList = returnItems
+    const returnItemsList: ReturnBillItem[] = returnItems
       .filter((item) => item.selected)
       .map((item) => ({
         bill_item_id: item.billItem.id,
-        billItemId: item.billItem.id,
         product_id: item.billItem.product_id,
-        productId: item.billItem.product_id,
         product_name: item.billItem.product_name_snapshot,
-        productName: item.billItem.product_name_snapshot,
         quantity: item.returnQty,
         unit_price_paise: item.billItem.unit_price_paise,
-        unitPricePaise: item.billItem.unit_price_paise,
         line_total_paise: item.billItem.unit_price_paise * item.returnQty,
-        lineTotalPaise: item.billItem.unit_price_paise * item.returnQty,
       }));
 
     setIsReturning(true);

@@ -14,7 +14,7 @@ export const Layout: React.FC = () => {
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-surface-50">
         <div className="spinner mb-3" />
         <div className="text-xs font-medium text-surface-500 tracking-wide">
-          Loading Billing APP...
+          Loading Billing Software...
         </div>
       </div>
     );

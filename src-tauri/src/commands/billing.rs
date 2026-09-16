@@ -427,17 +427,17 @@ pub fn complete_bill(
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ReturnBillItemPayload {
-    #[serde(alias = "billItemId", alias = "bill_item_id")]
+    #[serde(alias = "billItemId")]
     pub bill_item_id: i64,
-    #[serde(alias = "productId", alias = "product_id", default)]
+    #[serde(alias = "productId", default)]
     pub product_id: Option<i64>,
-    #[serde(alias = "productName", alias = "product_name", default)]
+    #[serde(alias = "productName", default)]
     pub product_name: Option<String>,
     #[serde(default)]
     pub quantity: i64,
-    #[serde(alias = "unitPricePaise", alias = "unit_price_paise", default)]
+    #[serde(alias = "unitPricePaise", default)]
     pub unit_price_paise: Option<i64>,
-    #[serde(alias = "lineTotalPaise", alias = "line_total_paise", default)]
+    #[serde(alias = "lineTotalPaise", default)]
     pub line_total_paise: Option<i64>,
 }
 
@@ -482,12 +482,9 @@ pub fn return_bill(
 
     let tx = db.conn.transaction().map_err(|e| format!("Transaction error: {}", e))?;
 
-    tx.execute(
-        "UPDATE bills SET status = 'returned', updated_at = datetime('now') WHERE id = ?1",
-        rusqlite::params![bill_id],
-    ).map_err(|e| format!("Failed to update bill status: {}", e))?;
-
+    // 1. Return items back to inventory stock and record stock movements
     for item in &items {
+        // Restore stock to inventory
         if let Some(pid) = item.product_id {
             if pid > 0 {
                 let _ = tx.execute(
@@ -502,12 +499,77 @@ pub fn return_bill(
                 );
             }
         }
+
+        // Deduct returned quantity from bill_items
+        let current_item_qty: i64 = tx.query_row(
+            "SELECT quantity FROM bill_items WHERE id = ?1",
+            rusqlite::params![item.bill_item_id],
+            |r| r.get(0),
+        ).unwrap_or(item.quantity);
+
+        let new_item_qty = (current_item_qty - item.quantity).max(0);
+        let unit_price = item.unit_price_paise.unwrap_or(0);
+        let new_line_total = new_item_qty * unit_price;
+
+        let _ = tx.execute(
+            "UPDATE bill_items SET quantity = ?1, line_total_paise = ?2 WHERE id = ?3",
+            rusqlite::params![new_item_qty, new_line_total, item.bill_item_id],
+        );
+    }
+
+    // 2. Fetch current bill financial totals
+    let current_bill_total: i64 = tx.query_row(
+        "SELECT grand_total_paise FROM bills WHERE id = ?1",
+        rusqlite::params![bill_id],
+        |r| r.get(0),
+    ).unwrap_or(0);
+
+    let remaining_items_sum: i64 = tx.query_row(
+        "SELECT COALESCE(SUM(quantity), 0) FROM bill_items WHERE bill_id = ?1",
+        rusqlite::params![bill_id],
+        |r| r.get(0),
+    ).unwrap_or(0);
+
+    let new_grand_total = (current_bill_total - refund_amount_paise).max(0);
+
+    // 3. Remove from Income (Sales revenue)
+    if remaining_items_sum == 0 || new_grand_total == 0 {
+        // FULL RETURN: Mark bill as returned (status='returned' completely excludes from completed sales & income)
+        tx.execute(
+            "UPDATE bills SET status = 'returned', void_reason = ?1, grand_total_paise = 0, subtotal_paise = 0, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![reason, bill_id],
+        ).map_err(|e| format!("Failed to update bill status: {}", e))?;
+
+        // Zero out payment record
+        let _ = tx.execute(
+            "UPDATE payments SET total_amount_paise = 0, cash_amount_paise = 0, upi_amount_paise = 0, card_amount_paise = 0 WHERE bill_id = ?1",
+            rusqlite::params![bill_id],
+        );
+    } else {
+        // PARTIAL RETURN: Reduce grand_total and subtotal by refund amount, keeping only remaining items as income
+        let note = format!("Partial Return: {} (Refunded: ₹{:.2})", reason, refund_amount_paise as f64 / 100.0);
+        tx.execute(
+            "UPDATE bills SET grand_total_paise = ?1, subtotal_paise = ?1, void_reason = ?2, updated_at = datetime('now') WHERE id = ?3",
+            rusqlite::params![new_grand_total, note, bill_id],
+        ).map_err(|e| format!("Failed to update bill totals: {}", e))?;
+
+        // Proportionately reduce payment record
+        let _ = tx.execute(
+            "UPDATE payments SET 
+                total_amount_paise = ?1,
+                cash_amount_paise = CASE WHEN total_amount_paise > 0 THEN (cash_amount_paise * ?1) / total_amount_paise ELSE 0 END,
+                upi_amount_paise = CASE WHEN total_amount_paise > 0 THEN (upi_amount_paise * ?1) / total_amount_paise ELSE 0 END,
+                card_amount_paise = CASE WHEN total_amount_paise > 0 THEN (card_amount_paise * ?1) / total_amount_paise ELSE 0 END
+             WHERE bill_id = ?2",
+            rusqlite::params![new_grand_total, bill_id],
+        );
     }
 
     let details = serde_json::json!({
         "bill_id": bill_id,
         "reason": reason,
         "refund_amount_paise": refund_amount_paise,
+        "new_grand_total_paise": new_grand_total,
         "item_count": items.len(),
     }).to_string();
 

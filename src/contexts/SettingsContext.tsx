@@ -49,7 +49,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       value={{
         settings,
         isLoading,
-        shopName: settings['shop_name'] || 'Billing APP',
+        shopName: settings['shop_name'] || 'Billing Software',
         currencySymbol: settings['currency_symbol'] || '₹',
         gstEnabled: settings['gst_enabled'] === 'true',
         gstNumber: settings['gst_number'] || '',

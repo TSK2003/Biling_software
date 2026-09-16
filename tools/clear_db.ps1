@@ -1,5 +1,5 @@
 $localAppData = [System.Environment]::GetFolderPath('LocalApplicationData')
-$dbPath = [System.IO.Path]::Combine($localAppData, 'com.aescion.pos', 'aescion_pos.db')
+$dbPath = [System.IO.Path]::Combine($localAppData, 'com.billing.software', 'billing_software.db')
 
 Write-Host "Checking DB Path: $dbPath"
 if (Test-Path $dbPath) {

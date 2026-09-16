@@ -12,8 +12,16 @@ use chrono::{DateTime, Utc};
 use crate::models::{ActivationRecord, LicensePayload, LicenseStatus};
 use super::device_service::get_device_fingerprint;
 
-/// Derives the master signing key from AESCION secure master seed
+/// Derives the master signing key from secure master seed
 pub fn get_master_signing_key() -> SigningKey {
+    let mut hasher = Sha256::new();
+    hasher.update(b"BILLING-SOFTWARE-OFFLINE-SECURITY-SIGNING-MASTER-KEY-2026");
+    let seed: [u8; 32] = hasher.finalize().into();
+    SigningKey::from_bytes(&seed)
+}
+
+/// Legacy fallback signing key for backward compatibility
+pub fn get_legacy_signing_key() -> SigningKey {
     let mut hasher = Sha256::new();
     hasher.update(b"AESCION-POS-OFFLINE-SECURITY-SIGNING-MASTER-KEY-2026");
     let seed: [u8; 32] = hasher.finalize().into();
@@ -35,23 +43,23 @@ pub fn create_signed_license_blob(payload: &LicensePayload) -> Result<Vec<u8>, S
     Ok(blob)
 }
 
-/// Helper to write an AESCION security key directly to a USB drive root
+/// Helper to write a security key directly to a USB drive root (BILLING_KEY/license.bin)
 pub fn write_usb_security_key(root_path: &Path, shop_name: &str, license_type: &str) -> Result<String, String> {
     let payload = LicensePayload {
-        license_id: format!("LIC-AESCION-{}", uuid::Uuid::new_v4().to_string()[..8].to_uppercase()),
+        license_id: format!("LIC-BILLING-{}", uuid::Uuid::new_v4().to_string()[..8].to_uppercase()),
         shop_name: shop_name.trim().to_string(),
         license_type: license_type.trim().to_string(),
         max_activations: 1,
         features: vec!["pos".to_string(), "billing".to_string(), "reports".to_string(), "network".to_string()],
         issued_at: Utc::now().to_rfc3339(),
         expires_at: None,
-        issuer: "AESCION TECHNOLOGIES".to_string(),
+        issuer: "Billing Software".to_string(),
         schema_version: 1,
     };
 
     let blob = create_signed_license_blob(&payload)?;
-    let key_dir = root_path.join("AESCION_KEY");
-    fs::create_dir_all(&key_dir).map_err(|e| format!("Failed to create AESCION_KEY directory on drive: {}", e))?;
+    let key_dir = root_path.join("BILLING_KEY");
+    fs::create_dir_all(&key_dir).map_err(|e| format!("Failed to create BILLING_KEY directory on drive: {}", e))?;
     
     let license_file = key_dir.join("license.bin");
     fs::write(&license_file, blob).map_err(|e| format!("Failed to write license.bin: {}", e))?;
@@ -71,14 +79,16 @@ pub fn verify_license_blob(bytes: &[u8]) -> Result<LicensePayload, String> {
 
     // Master verifying key derived from master signing key
     let verifying_key: VerifyingKey = get_master_signing_key().verifying_key();
+    let legacy_key: VerifyingKey = get_legacy_signing_key().verifying_key();
 
     // Parse signature
     let signature = Signature::from_slice(signature_bytes)
         .map_err(|e| format!("Invalid signature format: {}", e))?;
 
-    // Verify signature
-    verifying_key.verify(payload_bytes, &signature)
-        .map_err(|_| "Cryptographic signature verification failed. Unauthorized security USB key.".to_string())?;
+    // Verify signature against current master key, with legacy fallback
+    if verifying_key.verify(payload_bytes, &signature).is_err() && legacy_key.verify(payload_bytes, &signature).is_err() {
+        return Err("Cryptographic signature verification failed. Unauthorized security USB key.".to_string());
+    }
 
     // Parse JSON payload
     let payload: LicensePayload = serde_json::from_slice(payload_bytes)
@@ -98,6 +108,15 @@ pub fn verify_license_blob(bytes: &[u8]) -> Result<LicensePayload, String> {
 
 /// Derives a 32-byte AES-GCM key from the hardware fingerprint
 fn derive_device_key(device_fingerprint: &str) -> [u8; 32] {
+    let hk = Hkdf::<Sha256>::new(Some(b"BILLING-SOFTWARE-SALT-2026"), device_fingerprint.as_bytes());
+    let mut okm = [0u8; 32];
+    hk.expand(b"BILLING-ACTIVATION-KEY", &mut okm)
+        .expect("32 bytes is valid length for HKDF");
+    okm
+}
+
+/// Fallback legacy device key derivation
+fn derive_legacy_device_key(device_fingerprint: &str) -> [u8; 32] {
     let hk = Hkdf::<Sha256>::new(Some(b"AESCION-POS-SALT-2026"), device_fingerprint.as_bytes());
     let mut okm = [0u8; 32];
     hk.expand(b"AESCION-ACTIVATION-KEY", &mut okm)
@@ -159,19 +178,25 @@ pub fn check_local_activation(activation_file: &Path) -> LicenseStatus {
     let plaintext = match cipher.decrypt(nonce, ciphertext) {
         Ok(pt) => pt,
         Err(_) => {
-            // Decryption failed. This means either:
-            // 1. Database/files were copied to a different computer (device key mismatch)
-            // 2. File was modified/tampered
-            return LicenseStatus {
-                state: "DEVICE_MISMATCH".to_string(),
-                license_id: None,
-                shop_name: None,
-                license_type: None,
-                activated_at: None,
-                expires_at: None,
-                app_version: None,
-                message: Some("This installation is bound to another device. Please re-activate using your Security Pen Drive.".to_string()),
-            };
+            // Try legacy cipher
+            let legacy_key = derive_legacy_device_key(&current_fingerprint);
+            let legacy_cipher = Aes256Gcm::new_from_slice(&legacy_key).expect("32 bytes is valid AES-256 key");
+            match legacy_cipher.decrypt(nonce, ciphertext) {
+                Ok(pt) => pt,
+                Err(_) => {
+                    // Decryption failed on both current and legacy keys
+                    return LicenseStatus {
+                        state: "DEVICE_MISMATCH".to_string(),
+                        license_id: None,
+                        shop_name: None,
+                        license_type: None,
+                        activated_at: None,
+                        expires_at: None,
+                        app_version: None,
+                        message: Some("This installation is bound to another device. Please re-activate using your Security Pen Drive.".to_string()),
+                    };
+                }
+            }
         }
     };
 

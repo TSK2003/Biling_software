@@ -44,49 +44,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aescion-pos"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "argon2",
- "axum",
- "base64 0.22.1",
- "calamine",
- "chrono",
- "ed25519-dalek",
- "env_logger",
- "genpdf",
- "hex",
- "hkdf",
- "hmac",
- "image",
- "local-ip-address",
- "log",
- "rand 0.8.7",
- "reqwest 0.12.28",
- "rusqlite",
- "rust_xlsxwriter",
- "serde",
- "serde_json",
- "sha2",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-opener",
- "thiserror 2.0.20",
- "tokio",
- "tower",
- "tower-http 0.5.2",
- "uuid",
- "walkdir",
- "wmi",
- "zip",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -563,6 +520,49 @@ name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+
+[[package]]
+name = "billing-software"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "argon2",
+ "axum",
+ "base64 0.22.1",
+ "calamine",
+ "chrono",
+ "ed25519-dalek",
+ "env_logger",
+ "genpdf",
+ "hex",
+ "hkdf",
+ "hmac",
+ "image",
+ "local-ip-address",
+ "log",
+ "rand 0.8.7",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "rust_xlsxwriter",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-opener",
+ "thiserror 2.0.20",
+ "tokio",
+ "tower",
+ "tower-http 0.5.2",
+ "uuid",
+ "walkdir",
+ "wmi",
+ "zip",
+]
 
 [[package]]
 name = "bit-set"

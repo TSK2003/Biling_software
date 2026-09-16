@@ -5,7 +5,7 @@ import os from 'os';
 // 1. Free ports 1420 & 4123 if occupied by stale previous runs
 try {
   if (os.platform() === 'win32') {
-    execSync('powershell -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort 1420,4123 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Stop-Process -Name \'aescion-pos\' -Force -ErrorAction SilentlyContinue"', { stdio: 'ignore' });
+    execSync('powershell -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort 1420,4123 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Stop-Process -Name \'billing-software\' -Force -ErrorAction SilentlyContinue; Stop-Process -Name \'aescion-pos\' -Force -ErrorAction SilentlyContinue"', { stdio: 'ignore' });
   }
 } catch {
   // Ignore
@@ -18,7 +18,7 @@ const env = {
   PATH: `${process.env.PATH || ''};${cargoBin}`,
 };
 
-console.log('Starting Billing APP...');
+console.log('Starting Billing Software...');
 
 const child = spawn('npx', ['tauri', 'dev'], {
   stdio: 'inherit',

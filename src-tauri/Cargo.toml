@@ -1,13 +1,13 @@
 [package]
-name = "aescion-pos"
+name = "billing-software"
 version = "0.1.0"
-description = "AESCION POS - Production Desktop Billing System"
-authors = ["AESCION"]
+description = "Billing Software - Production Desktop Billing System"
+authors = ["Billing Software"]
 edition = "2021"
-default-run = "aescion-pos"
+default-run = "billing-software"
 
 [[bin]]
-name = "aescion-pos"
+name = "billing-software"
 path = "src/main.rs"
 
 [[bin]]
@@ -15,7 +15,7 @@ name = "make_usb_key"
 path = "src/bin/make_usb_key.rs"
 
 [lib]
-name = "aescion_pos_lib"
+name = "billing_software_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

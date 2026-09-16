@@ -13,10 +13,10 @@ pub fn check_license(state: State<'_, AppState>) -> Result<LicenseStatus, String
     Ok(status)
 }
 
-/// Detect connected AESCION security USB key
+/// Detect connected security USB key
 #[tauri::command]
 pub fn detect_usb_key() -> Result<Option<USBKeyInfo>, String> {
-    let info = usb_service::find_aescion_usb_key();
+    let info = usb_service::find_billing_usb_key();
     Ok(info)
 }
 
@@ -34,7 +34,7 @@ pub fn activate_license(state: State<'_, AppState>, drive_letter: String) -> Res
     
     let drive_path = Path::new(&drive_letter);
     let usb_info = usb_service::check_drive_for_key(drive_path)
-        .ok_or_else(|| "No AESCION Security Key found on the specified drive".to_string())?;
+        .ok_or_else(|| "No Security Pen Drive key found on the specified drive".to_string())?;
 
     if !usb_info.is_valid {
         return Err(usb_info.message);
@@ -150,7 +150,7 @@ pub fn deactivate_license(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// Admin tool to write and format an official AESCION Security USB Pen Drive for any shop
+/// Admin tool to write and format an official Security USB Pen Drive for any shop
 #[tauri::command]
 pub fn create_security_usb_key(drive_letter: String, shop_name: String, license_type: Option<String>) -> Result<String, String> {
     let drive_path = Path::new(&drive_letter);

@@ -26,13 +26,13 @@ impl BackupService {
             "SELECT value FROM settings WHERE key = 'shop_name'",
             [],
             |r| r.get(0),
-        ).unwrap_or_else(|_| "AESCION Shop".to_string());
+        ).unwrap_or_else(|_| "Billing Software Shop".to_string());
 
         let shop_id: String = db.conn.query_row(
             "SELECT value FROM settings WHERE key = 'shop_id'",
             [],
             |r| r.get(0),
-        ).unwrap_or_else(|_| "SHOP-AESCION-000001".to_string());
+        ).unwrap_or_else(|_| "SHOP-BILLING-000001".to_string());
 
         let product_count: i64 = db.conn.query_row("SELECT COUNT(*) FROM products", [], |r| r.get(0)).unwrap_or(0);
         let category_count: i64 = db.conn.query_row("SELECT COUNT(*) FROM categories", [], |r| r.get(0)).unwrap_or(0);

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Billing APP",
+  "productName": "Billing Software",
   "version": "0.1.0",
-  "identifier": "com.billing.pos",
+  "identifier": "com.billing.software",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Billing APP",
+        "title": "Billing Software",
         "label": "main",
         "width": 1280,
         "height": 800,

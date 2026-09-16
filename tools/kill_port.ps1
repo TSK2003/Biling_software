@@ -7,5 +7,6 @@ if ($connections) {
     }
 }
 
+Stop-Process -Name "billing-software" -Force -ErrorAction SilentlyContinue
 Stop-Process -Name "aescion-pos" -Force -ErrorAction SilentlyContinue
 Write-Host "Port 1420 is now free."

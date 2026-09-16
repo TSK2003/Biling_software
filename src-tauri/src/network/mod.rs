@@ -46,7 +46,7 @@ pub fn start_host_services(
                     return;
                 }
             };
-            log::info!("AESCION Host Local Network Service active on {}", bind_addr);
+            log::info!("Billing Software Host Local Network Service active on {}", bind_addr);
             let _ = axum::serve(listener, app).await;
         });
     });
