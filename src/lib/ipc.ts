@@ -145,10 +145,16 @@ export const api = {
     invoke<Product[]>('search_products', { query, categoryId }),
   uploadProductImage: (productId: number, sourcePath: string) =>
     invoke<string>('upload_product_image', { productId, sourcePath }),
+  seedDemoProducts: () =>
+    invoke<number>('seed_demo_products'),
+  clearDemoProducts: () =>
+    invoke<number>('clear_demo_products'),
 
   // Billing
   getBillingProducts: (categoryId?: number, search?: string) =>
     invoke<BillingProduct[]>('get_billing_products', { categoryId, search }),
+  getNextBillNumber: () =>
+    invoke<number>('get_next_bill_number'),
   saveDraft: (userId: number, cartJson: string, discountJson: string) =>
     invoke<void>('save_draft', { userId, cartJson, discountJson }),
   loadDraft: (userId: number) =>
@@ -274,8 +280,6 @@ export const api = {
     invoke<LicenseStatus>('activate_license', { driveLetter }),
   activateWithCode: (code: string, shopName?: string) =>
     invoke<LicenseStatus>('activate_with_code', { code, shopName }),
-  createSecurityUsbKey: (driveLetter: string, shopName: string, licenseType?: string) =>
-    invoke<string>('create_security_usb_key', { driveLetter, shopName, licenseType }),
   getLicenseInfo: () => invoke<LicenseStatus>('get_license_info'),
   deactivateLicense: () => invoke<void>('deactivate_license'),
 
@@ -312,6 +316,7 @@ export const api = {
     invoke<void>('revoke_device', { deviceId }),
   renameDevice: (deviceId: string, newName: string) =>
     invoke<void>('rename_device', { deviceId, newName }),
+  setupFirewallRules: () => invoke<string>('setup_firewall_rules'),
 
   // Inventory & Stock
   getInventory: () => invoke<InventoryItem[]>('get_inventory'),

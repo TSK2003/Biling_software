@@ -82,7 +82,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!user) return false;
     if (user.role === 'admin') return true;
     if (!user.permissions || user.permissions.length === 0) {
-      return screen === 'billing' || screen === 'bills';
+      return ['billing', 'bills', 'dashboard', 'products', 'categories', 'reports'].includes(screen as string);
     }
     return (user.permissions as string[]).includes(screen as string);
   };

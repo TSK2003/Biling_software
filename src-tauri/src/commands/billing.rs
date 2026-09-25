@@ -12,10 +12,7 @@ pub fn get_billing_products(
     
     // If in Client mode, fetch products from Host PC
     if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::network::client::get_http_client();
 
         let url = format!("http://{}:{}/api/billing/products", host_ip, host_port);
         let mut query_params = Vec::new();
@@ -44,10 +41,10 @@ pub fn get_billing_products(
     }
 
     let mut sql = String::from(
-        "SELECT p.id, p.product_code, p.name, p.category_id, c.name as category_name,
+        "SELECT p.id, p.product_code, p.name, p.category_id, COALESCE(c.name, 'General') as category_name,
                 p.image_path, p.selling_price_paise, p.gst_enabled, p.gst_percentage_x100
          FROM products p
-         JOIN categories c ON p.category_id = c.id
+         LEFT JOIN categories c ON p.category_id = c.id
          WHERE p.is_active = 1"
     );
     
@@ -193,10 +190,7 @@ pub fn complete_bill(
     
     // If in Client mode, forward bill completion to Host PC
     if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(8))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::network::client::get_http_client();
 
         let url = format!("http://{}:{}/api/billing/create", host_ip, host_port);
         let req_id = format!("REQ-{}-{}", chrono::Utc::now().timestamp_millis(), uuid::Uuid::new_v4().to_string()[..6].to_uppercase());
@@ -314,10 +308,10 @@ pub fn complete_bill(
     let tx = db.conn.unchecked_transaction()
         .map_err(|e| format!("Transaction error: {}", e))?;
     
-    // Get next bill number for this business date
+    // Get next global unique bill number
     let bill_number: i32 = tx.query_row(
-        "SELECT COALESCE(MAX(bill_number), 0) + 1 FROM bills WHERE business_date = ?1",
-        rusqlite::params![business_date],
+        "SELECT COALESCE(MAX(bill_number), 0) + 1 FROM bills",
+        [],
         |row| row.get(0),
     ).map_err(|e| format!("Bill number error: {}", e))?;
     
@@ -534,10 +528,11 @@ pub fn return_bill(
 
     // 3. Remove from Income (Sales revenue)
     if remaining_items_sum == 0 || new_grand_total == 0 {
-        // FULL RETURN: Mark bill as returned (status='returned' completely excludes from completed sales & income)
+        // FULL RETURN: Mark bill as cancelled
+        let cancel_note = format!("Full Return / Cancelled: {}", reason);
         tx.execute(
-            "UPDATE bills SET status = 'returned', void_reason = ?1, grand_total_paise = 0, subtotal_paise = 0, updated_at = datetime('now') WHERE id = ?2",
-            rusqlite::params![reason, bill_id],
+            "UPDATE bills SET status = 'cancelled', void_reason = ?1, grand_total_paise = 0, subtotal_paise = 0, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![cancel_note, bill_id],
         ).map_err(|e| format!("Failed to update bill status: {}", e))?;
 
         // Zero out payment record
@@ -546,10 +541,10 @@ pub fn return_bill(
             rusqlite::params![bill_id],
         );
     } else {
-        // PARTIAL RETURN: Reduce grand_total and subtotal by refund amount, keeping only remaining items as income
+        // PARTIAL RETURN: Mark bill status as 'returned' with remaining net sales balance
         let note = format!("Partial Return: {} (Refunded: ₹{:.2})", reason, refund_amount_paise as f64 / 100.0);
         tx.execute(
-            "UPDATE bills SET grand_total_paise = ?1, subtotal_paise = ?1, void_reason = ?2, updated_at = datetime('now') WHERE id = ?3",
+            "UPDATE bills SET status = 'returned', grand_total_paise = ?1, subtotal_paise = ?1, void_reason = ?2, updated_at = datetime('now') WHERE id = ?3",
             rusqlite::params![new_grand_total, note, bill_id],
         ).map_err(|e| format!("Failed to update bill totals: {}", e))?;
 
@@ -581,5 +576,19 @@ pub fn return_bill(
 
     tx.commit().map_err(|e| format!("Commit failed: {}", e))?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_next_bill_number(state: State<'_, AppState>) -> Result<i32, String> {
+    let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+    
+    // If in Client mode, fetch from Host PC or query local DB
+    let next_num: i32 = db.conn.query_row(
+        "SELECT COALESCE(MAX(bill_number), 0) + 1 FROM bills",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(1);
+    
+    Ok(next_num)
 }
 

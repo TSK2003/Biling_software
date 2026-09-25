@@ -52,8 +52,8 @@ export const LoginPage: React.FC = () => {
   }
 
   return (
-    <div className="h-screen w-screen flex items-center justify-center bg-surface-100 p-4 select-none">
-      <div className="bg-white rounded-2xl shadow-xl border border-surface-200 p-8 max-w-sm w-full transition-all">
+    <div className="fixed inset-0 h-full w-full overflow-y-auto overflow-x-hidden bg-surface-100 select-none flex flex-col items-center p-3 sm:p-6 md:p-8">
+      <div className="my-auto bg-white rounded-2xl shadow-xl border border-surface-200 p-6 sm:p-8 max-w-sm w-full transition-all">
         {/* Customer Shop Header */}
         <div className="text-center mb-6">
           {customLogo ? (
@@ -90,7 +90,7 @@ export const LoginPage: React.FC = () => {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. john_doe"
+                placeholder="Enter username"
                 className="form-input pl-9 text-xs"
                 required
                 autoFocus
@@ -109,7 +109,7 @@ export const LoginPage: React.FC = () => {
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="Enter password"
                 className="form-input pl-9 pr-9 text-xs"
                 required
               />

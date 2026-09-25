@@ -94,6 +94,23 @@ Billing Software supports connecting multiple billing terminals, cashier counter
 
 ---
 
+
+---
+
+## 📦 Build & Installer Commands
+
+| Command | Purpose | Output Location |
+| :--- | :--- | :--- |
+| `npm run build:installer:demo` | **Builds Windows Installer with 100+ Demo Products pre-loaded** | `src-tauri/target/release/bundle/nsis/` |
+| `npm run build:installer:clean` | **Builds Clean Windows Installer without any demo data** | `src-tauri/target/release/bundle/nsis/` |
+| `npm run build:installer` | Default production installer build (same as clean) | `src-tauri/target/release/bundle/nsis/` |
+| `npm run seed:demo` | Instantly seeds 112+ demo products & 8 categories into local DB (for instant test) | Local AppData DB |
+| `npm run clear:demo` | Instantly wipes demo products & categories from local DB | Local AppData DB |
+| `npm start` | Launches development server with hot-reload | `localhost:1420` |
+| `npm run build:exe` | Compiles standalone production `.exe` binary without packaging | `src-tauri/target/release/billing-software.exe` |
+
+---
+
 ### 👥 Step 2: Create Cashier & Staff Accounts
 From the Main Admin PC:
 1. Navigate to **Staff & Users** in the sidebar.
@@ -307,26 +324,7 @@ Billing_Software/
     │   │   └── gdrive_service.rs  # Cloud sync background worker
     │   ├── lib.rs             # Application initialization & thread spawns
     │   └── main.rs            # Desktop executable entry point
-    └── tests/
-        ├── business_scenario_test.rs # E2E transaction & inventory test
-        └── wipe_db.rs                # Clean database reset utility
 ```
-
----
-
-## 🧪 Testing & Verification
-
-Run the automated end-to-end business transaction test:
-
-```powershell
-$env:Path += ";$env:USERPROFILE\.cargo\bin"; cargo test --test business_scenario_test -- --nocapture
-```
-
-The test automatically verifies:
-1. Product inventory reduction upon sales checkout.
-2. Multi-channel payment records (Cash & UPI).
-3. Excel daily report generation and Calamine duplicate detection.
-4. Backup `.zip` creation, manifest checksum integrity, and restore isolation.
 
 ---
 

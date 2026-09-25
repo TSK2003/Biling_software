@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Eye, Ban, Calendar, RotateCcw, CheckCircle2 } from 'lucide-react';
+import { Search, Eye, Ban, RotateCcw, CheckCircle2, Printer } from 'lucide-react';
 import { api } from '../../lib/ipc';
-import { formatCurrency } from '../../lib/format';
+import { formatCurrency, getTodayDateString } from '../../lib/format';
 import { Modal } from '../../components/Modal';
 import { Header } from '../../components/Header';
+import { ReceiptPrintModal } from '../../components/ReceiptPrintModal';
 import { useAuth } from '../../contexts/AuthContext';
 import type { Bill, BillDetail, BillItem, ReturnBillItem } from '../../types';
 import toast from 'react-hot-toast';
@@ -16,7 +17,8 @@ interface ReturnItemState {
 }
 
 export const BillsPage: React.FC = () => {
-  const { user, isAdmin } = useAuth();
+  const todayStr = getTodayDateString();
+  const { user } = useAuth();
   const [bills, setBills] = useState<Bill[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
@@ -27,9 +29,11 @@ export const BillsPage: React.FC = () => {
   const [selectedBillDetail, setSelectedBillDetail] = useState<BillDetail | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
 
   // Void Bill Modal
   const [isVoidOpen, setIsVoidOpen] = useState(false);
+  const [voidingBill, setVoidingBill] = useState<Bill | null>(null);
   const [voidingBillId, setVoidingBillId] = useState<number | null>(null);
   const [voidReason, setVoidReason] = useState('');
   const [isVoiding, setIsVoiding] = useState(false);
@@ -61,8 +65,11 @@ export const BillsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadBills();
-  }, [selectedDate, selectedStatus]);
+    const timer = setTimeout(() => {
+      loadBills();
+    }, searchQuery ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [selectedDate, selectedStatus, searchQuery]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +91,7 @@ export const BillsPage: React.FC = () => {
   };
 
   const handleOpenVoid = (bill: Bill) => {
+    setVoidingBill(bill);
     setVoidingBillId(bill.id);
     setVoidReason('');
     setIsVoidOpen(true);
@@ -94,7 +102,7 @@ export const BillsPage: React.FC = () => {
     setIsVoiding(true);
     try {
       await api.voidBill(voidingBillId, user.id, voidReason.trim());
-      toast.success('Bill voided successfully');
+      toast.success(`Bill #${voidingBill?.bill_number || voidingBillId} voided successfully`);
       setIsVoidOpen(false);
       loadBills();
     } catch (err: any) {
@@ -116,11 +124,18 @@ export const BillsPage: React.FC = () => {
     try {
       const detail = await api.getBillDetail(bill.id);
 
-      // Initialize return items with all items from the bill
-      const items: ReturnItemState[] = detail.items.map((item) => ({
+      // Only initialize return items that have remaining quantity > 0
+      const activeItems = detail.items.filter((item) => item.quantity > 0);
+      if (activeItems.length === 0) {
+        toast.error('All items from this bill have already been returned');
+        setIsReturnOpen(false);
+        return;
+      }
+
+      const items: ReturnItemState[] = activeItems.map((item) => ({
         billItem: item,
         selected: false,
-        returnQty: item.quantity, // Default return qty = full quantity
+        returnQty: item.quantity, // Default return qty = available remaining quantity
       }));
       setReturnItems(items);
     } catch (err) {
@@ -159,6 +174,12 @@ export const BillsPage: React.FC = () => {
 
   const selectedReturnCount = returnItems.filter((item) => item.selected).length;
 
+  const isAllItemsReturned =
+    returningBill !== null &&
+    selectedReturnCount > 0 &&
+    (returnRefundTotal >= (returningBill.grand_total_paise || 0) ||
+      returnItems.every((item) => !item.selected || item.returnQty >= item.billItem.quantity));
+
   const handleConfirmReturn = async () => {
     if (!user?.id || !returningBill) return;
 
@@ -183,6 +204,10 @@ export const BillsPage: React.FC = () => {
         line_total_paise: item.billItem.unit_price_paise * item.returnQty,
       }));
 
+    const isAllItemsReturned =
+      returnRefundTotal >= returningBill.grand_total_paise ||
+      returnItems.every((item) => !item.selected || item.returnQty >= item.billItem.quantity);
+
     setIsReturning(true);
     try {
       await api.returnBill(
@@ -192,7 +217,11 @@ export const BillsPage: React.FC = () => {
         returnItemsList,
         returnRefundTotal
       );
-      toast.success(`Return processed for Bill #${returningBill.bill_number}. Refund: ${formatCurrency(returnRefundTotal)}`);
+      if (isAllItemsReturned) {
+        toast.success(`Bill #${returningBill.bill_number} all items returned. Status set to Cancelled.`);
+      } else {
+        toast.success(`Partial return processed for Bill #${returningBill.bill_number}. Status set to Returned.`);
+      }
       setIsReturnOpen(false);
       loadBills();
     } catch (err: any) {
@@ -207,20 +236,36 @@ export const BillsPage: React.FC = () => {
   const getStatusBadge = (status: string, voidReason?: string) => {
     switch (status) {
       case 'completed':
-        return <span className="badge badge-success">Completed</span>;
+        return <span className="badge badge-success font-semibold">Completed</span>;
+      case 'returned':
+        return (
+          <span
+            className="badge badge-warning font-semibold cursor-help"
+            title={voidReason || 'Partially Returned'}
+          >
+            Returned
+          </span>
+        );
+      case 'cancelled':
+        return (
+          <span
+            className="badge badge-neutral font-semibold cursor-help"
+            title={voidReason || 'All items returned / Cancelled'}
+          >
+            Cancelled
+          </span>
+        );
       case 'voided':
         return (
           <span
-            className="badge badge-danger cursor-help"
-            title={voidReason || 'Voided'}
+            className="badge badge-danger font-semibold cursor-help"
+            title={voidReason || 'Voided Transaction'}
           >
             Voided
           </span>
         );
-      case 'returned':
-        return <span className="badge badge-warning">Returned</span>;
       default:
-        return <span className="badge badge-neutral">{status}</span>;
+        return <span className="badge badge-neutral font-semibold">{status}</span>;
     }
   };
 
@@ -240,19 +285,20 @@ export const BillsPage: React.FC = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by bill # or staff name..."
+              placeholder="Search by bill number or staff name..."
               className="form-input pl-9 text-sm"
             />
           </form>
 
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 text-sm text-surface-600">
-              <Calendar className="w-4 h-4" />
               <input
                 type="date"
                 value={selectedDate}
+                max={todayStr}
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="form-input text-sm py-1"
+                title="Filter by business date (up to today)"
               />
             </div>
 
@@ -263,8 +309,9 @@ export const BillsPage: React.FC = () => {
             >
               <option value="">All Statuses</option>
               <option value="completed">Completed</option>
+              <option value="returned">Returned (Partial)</option>
+              <option value="cancelled">Cancelled (Full Return)</option>
               <option value="voided">Voided</option>
-              <option value="returned">Returned</option>
             </select>
 
             {(selectedDate || selectedStatus || searchQuery) && (
@@ -294,7 +341,7 @@ export const BillsPage: React.FC = () => {
                   <th className="w-28 text-center">Payment</th>
                   <th className="w-28 text-right">Subtotal</th>
                   <th className="w-24 text-right">Discount</th>
-                  <th className="w-24 text-right">GST</th>
+                  <th className="w-28 text-right">GST Amount</th>
                   <th className="w-32 text-right">Grand Total</th>
                   <th className="w-28 text-center">Status</th>
                   <th className="w-40 text-right">Actions</th>
@@ -348,10 +395,12 @@ export const BillsPage: React.FC = () => {
                           ? `-${formatCurrency(b.discount_amount_paise)}`
                           : '₹0.00'}
                       </td>
-                      <td className="font-mono text-surface-600">
-                        {b.gst_total_paise > 0
-                          ? formatCurrency(b.gst_total_paise)
-                          : '₹0.00'}
+                      <td className="font-mono text-right">
+                        {b.gst_total_paise > 0 ? (
+                          <span className="text-surface-700 font-semibold">{formatCurrency(b.gst_total_paise)}</span>
+                        ) : (
+                          <span className="text-surface-400">—</span>
+                        )}
                       </td>
                       <td className="font-mono font-bold text-surface-900">
                         {formatCurrency(b.grand_total_paise)}
@@ -360,37 +409,54 @@ export const BillsPage: React.FC = () => {
                         {getStatusBadge(b.status, b.void_reason)}
                       </td>
                       <td className="text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* View Details */}
+                        <div className="flex items-center justify-end gap-1">
+                          {/* View Details — always visible */}
                           <button
+                            type="button"
                             onClick={() => handleOpenDetail(b.id)}
-                            className="p-1.5 text-surface-500 hover:text-primary-600 rounded hover:bg-surface-100 transition-colors"
-                            title="View Bill Details"
+                            className="p-1.5 text-surface-500 hover:text-primary-600 rounded hover:bg-primary-50 transition-colors cursor-pointer"
+                            title="View Bill Details & Receipt"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
 
-                          {/* Return Button — on completed bills */}
-                          {b.status === 'completed' && (
+                          {/* Return Button — available on completed and returned bills for Admin & Staff */}
+                          {(b.status === 'completed' || b.status === 'returned') ? (
                             <button
+                              type="button"
                               onClick={() => handleOpenReturn(b)}
-                              className="p-1.5 text-surface-400 hover:text-amber-600 rounded hover:bg-amber-50 transition-colors"
+                              className="p-1.5 text-surface-500 hover:text-amber-600 rounded hover:bg-amber-50 transition-colors cursor-pointer"
                               title="Return / Refund items from this bill"
                             >
                               <RotateCcw className="w-4 h-4" />
                             </button>
-                          )}
+                          ) : b.status === 'cancelled' ? (
+                            <span
+                              className="p-1.5 text-surface-300 cursor-not-allowed"
+                              title="All items returned — Bill Cancelled"
+                            >
+                              <RotateCcw className="w-4 h-4 opacity-40" />
+                            </span>
+                          ) : null}
 
-                          {/* Void Button — admin only on completed bills */}
-                          {isAdmin && b.status === 'completed' && (
+                          {/* Void Button — available on completed and returned bills for Admin & Staff */}
+                          {(b.status === 'completed' || b.status === 'returned') ? (
                             <button
+                              type="button"
                               onClick={() => handleOpenVoid(b)}
-                              className="p-1.5 text-surface-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors"
-                              title="Void Bill (Admin Only)"
+                              className="p-1.5 text-surface-500 hover:text-red-600 rounded hover:bg-red-50 transition-colors cursor-pointer"
+                              title="Void Bill"
                             >
                               <Ban className="w-4 h-4" />
                             </button>
-                          )}
+                          ) : b.status === 'voided' ? (
+                            <span
+                              className="p-1.5 text-surface-300 cursor-not-allowed"
+                              title="Bill is already voided"
+                            >
+                              <Ban className="w-4 h-4 opacity-40" />
+                            </span>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -412,6 +478,28 @@ export const BillsPage: React.FC = () => {
             : 'Loading Bill...'
         }
         maxWidth="lg"
+        footer={
+          selectedBillDetail && (
+            <div className="flex items-center justify-between w-full">
+              <button
+                type="button"
+                onClick={() => setIsDetailOpen(false)}
+                className="btn-secondary text-sm px-4 py-2 font-semibold"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsPrintModalOpen(true)}
+                className="btn-primary text-sm font-bold flex items-center gap-2 px-5 py-2"
+                title="Print bill receipt"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Print Bill Receipt</span>
+              </button>
+            </div>
+          )
+        }
       >
         {isDetailLoading || !selectedBillDetail ? (
           <div className="py-8 text-center text-surface-400">
@@ -535,6 +623,38 @@ export const BillsPage: React.FC = () => {
           </div>
         )}
       </Modal>
+
+      {/* Bill Receipt Print Modal */}
+      {selectedBillDetail && (
+        <ReceiptPrintModal
+          isOpen={isPrintModalOpen}
+          onClose={() => setIsPrintModalOpen(false)}
+          title={`Print Bill #${selectedBillDetail.bill.bill_number}`}
+          billData={{
+            billNumber: selectedBillDetail.bill.bill_number,
+            billUuid: selectedBillDetail.bill.bill_uuid,
+            businessDate: selectedBillDetail.bill.business_date,
+            billTime: selectedBillDetail.bill.bill_time,
+            cashierName: selectedBillDetail.bill.user_name || 'Staff',
+            items: selectedBillDetail.items.map((it) => ({
+              product_name: it.product_name_snapshot,
+              product_code: it.product_code_snapshot,
+              quantity: it.quantity,
+              unit_price_paise: it.unit_price_paise,
+              line_total_paise: it.line_total_paise,
+            })),
+            subtotalPaise: selectedBillDetail.bill.subtotal_paise,
+            discountAmountPaise: selectedBillDetail.bill.discount_amount_paise,
+            discountType: selectedBillDetail.bill.discount_type,
+            discountValue: selectedBillDetail.bill.discount_value_x100 / 100,
+            gstTotalPaise: selectedBillDetail.bill.gst_total_paise,
+            grandTotalPaise: selectedBillDetail.bill.grand_total_paise,
+            paymentMethod: selectedBillDetail.payment?.payment_method || selectedBillDetail.bill.payment_method || 'cash',
+            tenderedCashPaise: selectedBillDetail.payment?.cash_amount_paise,
+            changeDuePaise: 0,
+          }}
+        />
+      )}
 
       {/* Return / Refund Modal */}
       <Modal
@@ -669,28 +789,66 @@ export const BillsPage: React.FC = () => {
               </table>
             </div>
 
-            {/* Return Reason */}
-            <div className="form-group">
-              <label className="form-label">Reason for Return *</label>
+            {/* Return Reason with Quick Presets */}
+            <div className="form-group space-y-1.5">
+              <label className="form-label text-xs font-semibold">Reason for Return *</label>
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {[
+                  'Customer Return',
+                  'Defective / Damaged Item',
+                  'Wrong Item Purchased',
+                  'Product Expired',
+                  'Customer Changed Mind',
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setReturnReason(preset)}
+                    className={`text-2xs px-2 py-1 rounded-md border transition-colors cursor-pointer ${
+                      returnReason === preset
+                        ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
+                        : 'bg-surface-50 text-surface-600 border-surface-200 hover:bg-surface-100'
+                    }`}
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
               <input
                 type="text"
                 value={returnReason}
                 onChange={(e) => setReturnReason(e.target.value)}
-                placeholder="e.g. Defective product, Customer changed mind, Wrong item delivered"
+                placeholder="Enter or select reason for return..."
                 className="form-input text-sm"
                 required
               />
             </div>
 
-            {/* Summary */}
+            {/* Summary & Status Outcome Preview */}
             {selectedReturnCount > 0 && (
-              <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm">
-                <div className="flex items-center gap-2 text-amber-800">
-                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                  <span>
-                    <strong>{selectedReturnCount} item(s)</strong> selected for return.
-                    Total refund: <strong className="font-mono">{formatCurrency(returnRefundTotal)}</strong>
+              <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm space-y-2">
+                <div className="flex items-center justify-between text-amber-900">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-amber-700 flex-shrink-0" />
+                    <span>
+                      <strong>{selectedReturnCount} item(s)</strong> selected for return
+                    </span>
+                  </div>
+                  <span className="font-mono font-bold text-base text-red-600">
+                    Refund: {formatCurrency(returnRefundTotal)}
                   </span>
+                </div>
+                <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs">
+                  <span className="text-surface-600">Updated Bill Status:</span>
+                  {isAllItemsReturned ? (
+                    <span className="badge badge-neutral font-bold">
+                      CANCELLED (Full Return)
+                    </span>
+                  ) : (
+                    <span className="badge badge-warning font-bold">
+                      RETURNED (Partial Return — ₹{formatCurrency((returningBill?.grand_total_paise || 0) - returnRefundTotal)} remaining)
+                    </span>
+                  )}
                 </div>
               </div>
             )}
@@ -702,38 +860,87 @@ export const BillsPage: React.FC = () => {
       <Modal
         isOpen={isVoidOpen}
         onClose={() => setIsVoidOpen(false)}
-        title="Void Completed Bill"
-        maxWidth="sm"
+        title={voidingBill ? `Void Bill #${voidingBill.bill_number}` : 'Void Bill'}
+        maxWidth="md"
         footer={
           <div className="flex items-center justify-end gap-2 w-full">
             <button
+              type="button"
               onClick={() => setIsVoidOpen(false)}
               className="btn-secondary text-sm"
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={handleConfirmVoid}
               disabled={isVoiding || !voidReason.trim()}
-              className="btn-danger text-sm font-bold"
+              className="btn-danger text-sm font-bold flex items-center gap-1.5 disabled:opacity-50"
             >
-              {isVoiding ? 'Voiding...' : 'Confirm Void'}
+              {isVoiding ? (
+                <>
+                  <div className="spinner w-3.5 h-3.5 border-white" />
+                  <span>Voiding Bill...</span>
+                </>
+              ) : (
+                <>
+                  <Ban className="w-4 h-4" />
+                  <span>Confirm Void Bill</span>
+                </>
+              )}
             </button>
           </div>
         }
       >
-        <div className="space-y-3">
-          <p className="text-sm text-surface-600">
-            Voiding will mark this transaction as cancelled in financial reports.
-            The historical record will be preserved for audit compliance.
+        <div className="space-y-3.5">
+          {voidingBill && (
+            <div className="p-3 rounded-lg bg-surface-50 border border-surface-200 flex items-center justify-between text-xs">
+              <div>
+                <span className="text-surface-500">Bill Number:</span>{' '}
+                <strong className="font-mono text-surface-900">#{voidingBill.bill_number}</strong>
+                <span className="text-surface-400 mx-2">•</span>
+                <span className="text-surface-500">Staff:</span>{' '}
+                <strong className="text-surface-900">{voidingBill.user_name || 'Staff'}</strong>
+              </div>
+              <div className="font-mono font-bold text-sm text-surface-900">
+                {formatCurrency(voidingBill.grand_total_paise)}
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-surface-600 leading-relaxed">
+            Voiding will cancel this transaction and zero out sales revenue while preserving the audit record for compliance.
           </p>
-          <div className="form-group">
-            <label className="form-label">Reason for Voiding *</label>
+
+          <div className="form-group space-y-1.5">
+            <label className="form-label text-xs font-semibold">Reason for Voiding *</label>
+            <div className="flex flex-wrap gap-1.5 mb-1">
+              {[
+                'Customer Cancellation',
+                'Billed by Mistake',
+                'Duplicate Entry',
+                'Payment Mode Wrong',
+                'Customer Left Without Paying',
+              ].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setVoidReason(preset)}
+                  className={`text-2xs px-2 py-1 rounded-md border transition-colors cursor-pointer ${
+                    voidReason === preset
+                      ? 'bg-red-100 text-red-900 border-red-300 font-bold'
+                      : 'bg-surface-50 text-surface-600 border-surface-200 hover:bg-surface-100'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
             <input
               type="text"
               value={voidReason}
               onChange={(e) => setVoidReason(e.target.value)}
-              placeholder="e.g. Customer cancelled order / Billing mistake"
+              placeholder="Enter or select reason for voiding..."
               className="form-input text-sm"
               required
               autoFocus

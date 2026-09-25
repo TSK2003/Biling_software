@@ -4,10 +4,10 @@ use axum::{
     extract::ws::{Message as WsMessage, WebSocket},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 use tokio::sync::broadcast;
@@ -28,6 +28,40 @@ pub struct ServerState {
 pub struct SearchQuery {
     pub q: Option<String>,
     pub category_id: Option<i64>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct CreateCategoryPayload {
+    pub name: String,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct UpdateCategoryPayload {
+    pub name: Option<String>,
+    pub sort_order: Option<i32>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct CreateProductPayload {
+    pub name: String,
+    pub category_id: i64,
+    pub selling_price_paise: i64,
+    pub gst_enabled: Option<bool>,
+    pub gst_percentage_x100: Option<i32>,
+    pub image_path: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct UpdateProductPayload {
+    pub name: Option<String>,
+    pub category_id: Option<i64>,
+    pub selling_price_paise: Option<i64>,
+    pub gst_enabled: Option<bool>,
+    pub gst_percentage_x100: Option<i32>,
+    pub is_active: Option<bool>,
+    pub image_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -60,8 +94,10 @@ pub fn create_router(state: ServerState) -> Router {
         .route("/api/auth/login", post(login_user))
         .route("/api/login", post(login_user))
         // Catalog & Products
-        .route("/api/categories", get(get_categories))
-        .route("/api/products", get(get_products))
+        .route("/api/categories", get(get_categories).post(create_category_endpoint))
+        .route("/api/categories/:id", put(update_category_endpoint).delete(delete_category_endpoint))
+        .route("/api/products", get(get_products).post(create_product_endpoint))
+        .route("/api/products/:id", put(update_product_endpoint).delete(delete_product_endpoint))
         .route("/api/billing/products", get(get_billing_products))
         // Billing & Checkout
         .route("/api/billing/create", post(create_bill))
@@ -93,13 +129,7 @@ async fn get_server_info(State(state): State<ServerState>) -> Result<Json<serde_
         "SELECT value FROM settings WHERE key = 'shop_name'",
         [],
         |r| r.get(0),
-    ).unwrap_or_else(|_| "Fruit Shop".to_string());
-
-    let conn_code: String = db.conn.query_row(
-        "SELECT value FROM settings WHERE key = 'connection_code'",
-        [],
-        |r| r.get(0),
-    ).unwrap_or_else(|_| "BILLING-884920".to_string());
+    ).unwrap_or_else(|_| "Billing Shop".to_string());
 
     let client_count: usize = db.conn.query_row(
         "SELECT COUNT(*) FROM devices WHERE device_type = 'client' AND is_approved = 1",
@@ -110,7 +140,6 @@ async fn get_server_info(State(state): State<ServerState>) -> Result<Json<serde_
     Ok(Json(json!({
         "shop_id": shop_id,
         "shop_name": shop_name,
-        "connection_code": conn_code,
         "app_version": "0.1.0",
         "client_count": client_count
     })))
@@ -128,14 +157,14 @@ async fn register_device(
         |r| r.get(0),
     ).unwrap_or_default();
 
-    if payload.connection_code.trim() != current_code.trim() {
+    if !payload.connection_code.trim().eq_ignore_ascii_case(current_code.trim()) {
         return Ok(Json(RegisterDeviceResponse {
             success: false,
             is_approved: false,
             shop_id: "".to_string(),
             shop_name: "".to_string(),
             api_token: "".to_string(),
-            message: "Invalid connection code. Please verify with Shop Admin.".to_string(),
+            message: "Invalid connection code. Please verify the PIN shown on the Main Host PC under Settings -> Network.".to_string(),
         }));
     }
 
@@ -332,16 +361,197 @@ async fn get_products(State(state): State<ServerState>) -> Result<Json<Vec<Produ
     Ok(Json(products))
 }
 
+async fn create_category_endpoint(
+    State(state): State<ServerState>,
+    Json(payload): Json<CreateCategoryPayload>,
+) -> Result<Json<Category>, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    let name = payload.name.trim().to_string();
+    if name.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Category name is required".to_string()));
+    }
+    let order = payload.sort_order.unwrap_or(0);
+    db.conn.execute(
+        "INSERT INTO categories (name, sort_order) VALUES (?1, ?2)",
+        rusqlite::params![name, order],
+    ).map_err(|e| {
+        if e.to_string().contains("UNIQUE") {
+            (StatusCode::CONFLICT, "A category with this name already exists".to_string())
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create category: {}", e))
+        }
+    })?;
+    let id = db.conn.last_insert_rowid();
+    let category = db.conn.query_row(
+        "SELECT id, name, image_path, sort_order, is_active, created_at, updated_at FROM categories WHERE id = ?1",
+        rusqlite::params![id],
+        |row| Ok(Category {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            image_path: row.get(2)?,
+            sort_order: row.get(3)?,
+            is_active: row.get::<_, i32>(4)? == 1,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        }),
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to fetch category: {}", e)))?;
+    Ok(Json(category))
+}
+
+async fn update_category_endpoint(
+    State(state): State<ServerState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdateCategoryPayload>,
+) -> Result<Json<Category>, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    if let Some(ref n) = payload.name {
+        let n = n.trim();
+        if n.is_empty() {
+            return Err((StatusCode::BAD_REQUEST, "Category name cannot be empty".to_string()));
+        }
+        db.conn.execute(
+            "UPDATE categories SET name = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![n, id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    if let Some(order) = payload.sort_order {
+        db.conn.execute(
+            "UPDATE categories SET sort_order = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![order, id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    if let Some(active) = payload.is_active {
+        db.conn.execute(
+            "UPDATE categories SET is_active = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![active as i32, id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    let category = db.conn.query_row(
+        "SELECT id, name, image_path, sort_order, is_active, created_at, updated_at FROM categories WHERE id = ?1",
+        rusqlite::params![id],
+        |row| Ok(Category {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            image_path: row.get(2)?,
+            sort_order: row.get(3)?,
+            is_active: row.get::<_, i32>(4)? == 1,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        }),
+    ).map_err(|_| (StatusCode::NOT_FOUND, "Category not found".to_string()))?;
+    Ok(Json(category))
+}
+
+async fn delete_category_endpoint(
+    State(state): State<ServerState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    let _ = db.conn.execute("DELETE FROM products WHERE category_id = ?1", rusqlite::params![id]);
+    db.conn.execute("DELETE FROM categories WHERE id = ?1", rusqlite::params![id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Delete failed: {}", e)))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn create_product_endpoint(
+    State(state): State<ServerState>,
+    Json(payload): Json<CreateProductPayload>,
+) -> Result<Json<Product>, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    let name = payload.name.trim().to_string();
+    if name.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "Product name is required".to_string()));
+    }
+    if payload.selling_price_paise < 0 {
+        return Err((StatusCode::BAD_REQUEST, "Price cannot be negative".to_string()));
+    }
+    let product_code = crate::commands::products::generate_product_code(&db.conn)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let gst_on = payload.gst_enabled.unwrap_or(false);
+    let gst_pct = payload.gst_percentage_x100.unwrap_or(0);
+
+    db.conn.execute(
+        "INSERT INTO products (product_code, name, category_id, selling_price_paise, gst_enabled, gst_percentage_x100, image_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![product_code, name, payload.category_id, payload.selling_price_paise, gst_on as i32, gst_pct, payload.image_path],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create product: {}", e)))?;
+
+    let id = db.conn.last_insert_rowid();
+    let product = crate::commands::products::get_product_by_id(&db.conn, id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(product))
+}
+
+async fn update_product_endpoint(
+    State(state): State<ServerState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdateProductPayload>,
+) -> Result<Json<Product>, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    if let Some(ref n) = payload.name {
+        let n = n.trim();
+        if n.is_empty() {
+            return Err((StatusCode::BAD_REQUEST, "Product name cannot be empty".to_string()));
+        }
+        db.conn.execute("UPDATE products SET name = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![n, id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    if let Some(cat_id) = payload.category_id {
+        db.conn.execute("UPDATE products SET category_id = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![cat_id, id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    if let Some(price) = payload.selling_price_paise {
+        if price < 0 {
+            return Err((StatusCode::BAD_REQUEST, "Price cannot be negative".to_string()));
+        }
+        db.conn.execute("UPDATE products SET selling_price_paise = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![price, id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    if let Some(gst) = payload.gst_enabled {
+        db.conn.execute("UPDATE products SET gst_enabled = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![gst as i32, id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    if let Some(pct) = payload.gst_percentage_x100 {
+        db.conn.execute("UPDATE products SET gst_percentage_x100 = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![pct, id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    if let Some(active) = payload.is_active {
+        db.conn.execute("UPDATE products SET is_active = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![active as i32, id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    if let Some(ref img) = payload.image_path {
+        db.conn.execute(
+            "UPDATE products SET image_path = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![if img.is_empty() { None } else { Some(img.as_str()) }, id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+
+    let product = crate::commands::products::get_product_by_id(&db.conn, id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(product))
+}
+
+async fn delete_product_endpoint(
+    State(state): State<ServerState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    let _ = db.conn.execute("UPDATE bill_items SET product_id = NULL WHERE product_id = ?1", rusqlite::params![id]);
+    db.conn.execute("DELETE FROM products WHERE id = ?1", rusqlite::params![id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Delete failed: {}", e)))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn get_billing_products(
     State(state): State<ServerState>,
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<Vec<BillingProduct>>, StatusCode> {
     let db = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut sql = String::from(
-        "SELECT p.id, p.product_code, p.name, p.category_id, c.name as category_name,
+        "SELECT p.id, p.product_code, p.name, p.category_id, COALESCE(c.name, 'General') as category_name,
                 p.image_path, p.selling_price_paise, p.gst_enabled, p.gst_percentage_x100
          FROM products p
-         JOIN categories c ON p.category_id = c.id
+         LEFT JOIN categories c ON p.category_id = c.id
          WHERE p.is_active = 1"
     );
 
@@ -446,10 +656,10 @@ async fn create_bill(
 
     let tx = db.conn.transaction().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Atomic next daily bill number on Host
+    // Atomic next global unique bill number on Host
     let max_bill_num: i32 = tx.query_row(
-        "SELECT COALESCE(MAX(bill_number), 0) FROM bills WHERE business_date = ?1",
-        rusqlite::params![business_date],
+        "SELECT COALESCE(MAX(bill_number), 0) FROM bills",
+        [],
         |row| row.get(0),
     ).unwrap_or(0);
     let bill_number = max_bill_num + 1;
@@ -684,10 +894,11 @@ async fn return_bill_endpoint(
 
     // 3. Remove from Income (Sales revenue)
     if remaining_items_sum == 0 || new_grand_total == 0 {
-        // FULL RETURN: Exclude bill completely from sales & income
+        // FULL RETURN: Mark bill as cancelled
+        let cancel_note = format!("Full Return / Cancelled: {}", reason);
         tx.execute(
-            "UPDATE bills SET status = 'returned', void_reason = ?1, grand_total_paise = 0, subtotal_paise = 0, updated_at = datetime('now') WHERE id = ?2",
-            rusqlite::params![reason, id],
+            "UPDATE bills SET status = 'cancelled', void_reason = ?1, grand_total_paise = 0, subtotal_paise = 0, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![cancel_note, id],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update bill status: {}", e)))?;
 
         let _ = tx.execute(
@@ -695,10 +906,10 @@ async fn return_bill_endpoint(
             rusqlite::params![id],
         );
     } else {
-        // PARTIAL RETURN: Reduce grand_total and payments by refund amount
+        // PARTIAL RETURN: Mark bill status as 'returned' with remaining net sales balance
         let note = format!("Partial Return: {} (Refunded: ₹{:.2})", reason, refund_amount_paise as f64 / 100.0);
         tx.execute(
-            "UPDATE bills SET grand_total_paise = ?1, subtotal_paise = ?1, void_reason = ?2, updated_at = datetime('now') WHERE id = ?3",
+            "UPDATE bills SET status = 'returned', grand_total_paise = ?1, subtotal_paise = ?1, void_reason = ?2, updated_at = datetime('now') WHERE id = ?3",
             rusqlite::params![new_grand_total, note, id],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update bill totals: {}", e)))?;
 

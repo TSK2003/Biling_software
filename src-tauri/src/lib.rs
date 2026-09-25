@@ -42,9 +42,7 @@ pub fn run() {
         .parse()
         .unwrap_or(4123);
 
-        let detected_ip = local_ip_address::local_ip()
-            .map(|ip| ip.to_string())
-            .unwrap_or_else(|_| "127.0.0.1".to_string());
+        let (detected_ip, _) = commands::network::get_active_lan_ips();
 
         drop(db_lock);
 
@@ -91,6 +89,7 @@ pub fn run() {
             commands::products::upload_product_image,
             // Billing commands
             commands::billing::get_billing_products,
+            commands::billing::get_next_bill_number,
             commands::billing::save_draft,
             commands::billing::load_draft,
             commands::billing::delete_draft,
@@ -132,7 +131,6 @@ pub fn run() {
             commands::licensing::get_all_drives,
             commands::licensing::activate_license,
             commands::licensing::activate_with_code,
-            commands::licensing::create_security_usb_key,
             commands::licensing::get_license_info,
             commands::licensing::deactivate_license,
             // Network & Multi-Computer commands
@@ -148,6 +146,7 @@ pub fn run() {
             commands::network::get_inventory,
             commands::network::adjust_stock,
             commands::network::get_stock_movements,
+            commands::network::setup_firewall_rules,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

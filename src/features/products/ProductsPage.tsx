@@ -28,8 +28,10 @@ export const ProductsPage: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadData = async () => {
-    setIsLoading(true);
+  const hasLoadedOnce = useRef(false);
+
+  const loadData = async (showFullSpinner = true) => {
+    if (showFullSpinner) setIsLoading(true);
     try {
       const [catList, prodRes] = await Promise.all([
         api.getCategories(true),
@@ -46,10 +48,52 @@ export const ProductsPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadData();
+    // Show full spinner only on first load; subsequent category switches are instant
+    loadData(!hasLoadedOnce.current);
+    hasLoadedOnce.current = true;
   }, [selectedCategory]);
 
+function compressImageFile(file: File, maxDim = 400, quality = 0.8): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(reader.result as string);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressed);
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
   const handleOpenAdd = () => {
+    if (categories.length === 0) {
+      toast.error('Please create at least one category before adding products');
+    }
     setEditingProduct(null);
     setFormName('');
     setFormCategory(categories[0]?.id || 1);
@@ -71,7 +115,7 @@ export const ProductsPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -80,18 +124,18 @@ export const ProductsPage: React.FC = () => {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Image size should be under 5MB');
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Image size should be under 10MB');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      setFormImagePath(result);
-      toast.success('Image selected successfully!');
-    };
-    reader.readAsDataURL(file);
+    try {
+      const optimizedDataUrl = await compressImageFile(file, 400, 0.8);
+      setFormImagePath(optimizedDataUrl);
+      toast.success('Image optimized & selected successfully!');
+    } catch {
+      toast.error('Failed to process image');
+    }
   };
 
   const handleRemoveImage = () => {
@@ -103,6 +147,7 @@ export const ProductsPage: React.FC = () => {
     e.preventDefault();
     if (!formName.trim() || !formPrice) return;
 
+    const chosenCat = formCategory || categories[0]?.id || 1;
     const pricePaise = rupeesToPaise(formPrice);
     const gstPctX100 = Math.round(parseFloat(formGstPct || '0') * 100);
 
@@ -112,24 +157,24 @@ export const ProductsPage: React.FC = () => {
         await api.updateProduct(
           editingProduct.id,
           formName.trim(),
-          formCategory,
+          chosenCat,
           pricePaise,
           formGstEnabled,
           gstPctX100,
           undefined,
           formImagePath.trim() || ''
         );
-        toast.success('Product updated with image successfully!');
+        toast.success('Product updated successfully!');
       } else {
         await api.createProduct(
           formName.trim(),
-          formCategory,
+          chosenCat,
           pricePaise,
           formGstEnabled,
           gstPctX100,
           formImagePath.trim() || undefined
         );
-        toast.success('Product created with image!');
+        toast.success('Product created successfully!');
       }
       setIsModalOpen(false);
       loadData();
@@ -141,6 +186,10 @@ export const ProductsPage: React.FC = () => {
   };
 
   const handleToggleActive = async (p: Product) => {
+    // Optimistic update — toggle instantly in UI without reload
+    setProducts(prev => prev.map(item =>
+      item.id === p.id ? { ...item, is_active: !p.is_active } : item
+    ));
     try {
       await api.updateProduct(
         p.id,
@@ -152,8 +201,11 @@ export const ProductsPage: React.FC = () => {
         !p.is_active
       );
       toast.success(p.is_active ? 'Product deactivated' : 'Product activated');
-      loadData();
     } catch (err: any) {
+      // Revert on error
+      setProducts(prev => prev.map(item =>
+        item.id === p.id ? { ...item, is_active: p.is_active } : item
+      ));
       toast.error(typeof err === 'string' ? err : 'Toggle failed');
     }
   };
@@ -167,9 +219,10 @@ export const ProductsPage: React.FC = () => {
     setIsDeleting(true);
     try {
       await api.deleteProduct(deletingProduct.id);
+      // Remove from local state instantly (no full reload)
+      setProducts(prev => prev.filter(item => item.id !== deletingProduct.id));
       toast.success(`Product "${deletingProduct.name}" deleted successfully`);
       setDeletingProduct(null);
-      loadData();
     } catch (err: any) {
       toast.error(typeof err === 'string' ? err : 'Failed to delete');
     } finally {
@@ -212,7 +265,7 @@ export const ProductsPage: React.FC = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products by code (PRD-...) or name..."
+              placeholder="Search products by code or name..."
               className="form-input pl-9 text-sm"
             />
           </div>
@@ -244,6 +297,7 @@ export const ProductsPage: React.FC = () => {
             <table className="table w-full">
               <thead>
                 <tr>
+                  <th className="w-12 text-center">#</th>
                   <th className="w-16 text-center">Image</th>
                   <th className="w-32">Product Code</th>
                   <th>Product Name</th>
@@ -257,20 +311,25 @@ export const ProductsPage: React.FC = () => {
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-8 text-surface-400">
+                    <td colSpan={9} className="text-center py-8 text-surface-400">
                       <div className="spinner mx-auto mb-2" />
                       Loading catalog...
                     </td>
                   </tr>
                 ) : filteredProducts.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-8 text-surface-400">
+                    <td colSpan={9} className="text-center py-8 text-surface-400">
                       No products found. Click "Add New Product" to create one.
                     </td>
                   </tr>
                 ) : (
-                  filteredProducts.map((p) => (
+                  filteredProducts.map((p, idx) => (
                     <tr key={p.id} className={!p.is_active ? 'opacity-60 bg-surface-50' : ''}>
+                      {/* Product Sequential Index */}
+                      <td className="text-center font-mono text-xs font-bold text-surface-500">
+                        #{idx + 1}
+                      </td>
+
                       {/* Product Image Thumbnail */}
                       <td>
                         <div className="w-10 h-10 rounded border border-surface-200 bg-surface-100 flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -429,7 +488,7 @@ export const ProductsPage: React.FC = () => {
               type="text"
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
-              placeholder="e.g. Product Name"
+              placeholder="Product Name"
               className="form-input"
               required
               autoFocus
@@ -461,7 +520,7 @@ export const ProductsPage: React.FC = () => {
                 min="0"
                 value={formPrice}
                 onChange={(e) => setFormPrice(e.target.value)}
-                placeholder="e.g. 80.00"
+                placeholder="0.00"
                 className="form-input font-mono font-bold"
                 required
               />

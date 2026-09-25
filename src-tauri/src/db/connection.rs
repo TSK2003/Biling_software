@@ -62,7 +62,26 @@ impl Database {
                 rusqlite::params![all_screens],
             );
         }
-        
+
+        // If built with demo-data feature or DEMO_DATA=1, auto-seed all 116 demo products
+        let is_demo_build = cfg!(feature = "demo-data") || match option_env!("DEMO_DATA") {
+            Some(v) => v == "1" || v.eq_ignore_ascii_case("true"),
+            None => false,
+        };
+
+        if is_demo_build {
+            let demo_seeded: bool = db.conn.query_row(
+                "SELECT 1 FROM products WHERE product_code = 'JUC001' LIMIT 1",
+                [],
+                |_| Ok(true),
+            ).unwrap_or(false);
+
+            if !demo_seeded {
+                let _ = super::demo_data::seed_demo_data(&db.conn);
+                log::info!("Pre-seeded 116 demo products into database (DEMO_DATA build)");
+            }
+        }
+
         Ok(db)
     }
     

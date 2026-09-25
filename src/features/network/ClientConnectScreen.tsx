@@ -148,8 +148,8 @@ export const ClientConnectScreen: React.FC<ClientConnectScreenProps> = ({
     : 0;
 
   return (
-    <div className="min-h-screen bg-surface-100 flex items-center justify-center p-4 select-none">
-      <div className="card w-full max-w-lg p-6 bg-white shadow-xl border border-surface-200 space-y-5">
+    <div className="fixed inset-0 h-full w-full overflow-y-auto overflow-x-hidden bg-surface-100 select-none flex flex-col items-center p-3 sm:p-6 md:p-8">
+      <div className="my-auto card w-full max-w-lg p-5 sm:p-6 bg-white shadow-xl border border-surface-200 space-y-4 sm:space-y-5 transition-all">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-surface-200 pb-3.5">
           <div>
@@ -289,7 +289,7 @@ export const ClientConnectScreen: React.FC<ClientConnectScreenProps> = ({
                 type="text"
                 value={hostIp}
                 onChange={(e) => setHostIp(e.target.value)}
-                placeholder="e.g. 192.168.1.15"
+                placeholder="Enter Host IP (e.g. 192.168.X.X)"
                 className="form-input font-mono text-xs h-8"
                 required
               />
@@ -307,12 +307,12 @@ export const ClientConnectScreen: React.FC<ClientConnectScreenProps> = ({
           </div>
 
           <div className="form-group">
-            <label className="form-label text-xs font-semibold">Shop Connection Code *</label>
+            <label className="form-label text-xs font-semibold">Shop Connection PIN *</label>
             <input
               type="text"
               value={connectionCode}
               onChange={(e) => setConnectionCode(e.target.value.toUpperCase())}
-              placeholder="e.g. BILLING-884920"
+              placeholder="Enter 6-digit Host Connection PIN"
               className="form-input font-mono uppercase text-xs tracking-wider h-8"
               required
             />
@@ -327,24 +327,33 @@ export const ClientConnectScreen: React.FC<ClientConnectScreenProps> = ({
               className={`p-3 rounded-lg border text-xs flex items-start gap-2.5 ${
                 testResult.success
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                  : 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
               }`}
             >
               {testResult.success ? (
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
               ) : (
-                <ShieldAlert className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                <ShieldAlert className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
               )}
               <div>
                 <div className="font-semibold">
                   {testResult.success
                     ? `Host Reachable: ${testResult.shop_name}`
-                    : 'Connection Failed'}
+                    : 'Connection Diagnostic'}
                 </div>
                 <div className="text-2xs mt-0.5">
                   {testResult.success
                     ? `Shop ID: ${testResult.shop_id} — Ready to pair with Main PC.`
-                    : testResult.message}
+                    : (
+                      <div className="space-y-1">
+                        <p>{testResult.message}</p>
+                        <ul className="list-disc pl-4 text-3xs space-y-0.5 text-amber-800">
+                          <li>Ensure both PCs are on the same Wi-Fi router / LAN.</li>
+                          <li>Verify the Host IP matches the IP shown in Main PC Settings.</li>
+                          <li>On Main PC, ensure Windows Defender Firewall allows port {hostPort} TCP.</li>
+                        </ul>
+                      </div>
+                    )}
                 </div>
               </div>
             </div>
@@ -371,6 +380,11 @@ export const ClientConnectScreen: React.FC<ClientConnectScreenProps> = ({
             </button>
           </div>
         </form>
+
+        {/* Quick Help Footer */}
+        <div className="pt-2 border-t border-surface-100 text-3xs text-surface-400 text-center">
+          Need help? On Main PC open <span className="font-semibold text-surface-600">Settings → Network & Connected Terminals</span> to see Host IP, Port and PIN.
+        </div>
       </div>
     </div>
   );

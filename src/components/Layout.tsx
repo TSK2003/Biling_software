@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { useLicense } from '../contexts/LicenseContext';
 import { ActivationScreen } from '../features/licensing/ActivationScreen';
+import { isClientMode } from '../lib/ipc';
 
 export const Layout: React.FC = () => {
   const { user, isLoading: authLoading } = useAuth();
@@ -20,8 +21,9 @@ export const Layout: React.FC = () => {
     );
   }
 
-  // If application is not activated, gate the entire app with ActivationScreen
-  if (!isActivated) {
+  // If application is not activated, gate with ActivationScreen
+  // Client terminals connected to a Host PC bypass the local USB license gate
+  if (!isActivated && !isClientMode()) {
     return <ActivationScreen />;
   }
 

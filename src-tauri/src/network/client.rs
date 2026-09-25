@@ -37,3 +37,24 @@ pub fn get_client_mode_host(conn: &Connection) -> Option<(String, u16)> {
 pub fn get_client_http_base(conn: &Connection) -> Option<String> {
     get_client_mode_host(conn).map(|(ip, port)| format!("http://{}:{}", ip, port))
 }
+
+use std::sync::LazyLock;
+use std::time::Duration;
+use reqwest::blocking::Client;
+
+/// Reusable HTTP client with keep-alive connection pooling, TCP nodelay, and fast connect timeout
+pub static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
+    Client::builder()
+        .timeout(Duration::from_secs(8))
+        .connect_timeout(Duration::from_secs(3))
+        .tcp_nodelay(true)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(10)
+        .build()
+        .unwrap_or_else(|_| Client::new())
+});
+
+/// Get static reference to pooled HTTP client
+pub fn get_http_client() -> &'static Client {
+    &HTTP_CLIENT
+}

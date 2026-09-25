@@ -457,6 +457,7 @@ pub struct NetworkInfo {
     pub device_name: String,
     pub is_approved: bool,
     pub client_count: usize,
+    pub available_ips: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -296,8 +296,8 @@ pub fn void_bill(
         |row| row.get(0),
     ).map_err(|_| "Bill not found".to_string())?;
     
-    if status != "completed" {
-        return Err(format!("Bill is already {}", status));
+    if status != "completed" && status != "returned" {
+        return Err(format!("Bill cannot be voided because it is already {}", status));
     }
     
     if reason.trim().is_empty() {
@@ -305,9 +305,15 @@ pub fn void_bill(
     }
     
     db.conn.execute(
-        "UPDATE bills SET status = 'voided', void_reason = ?1, voided_by_user_id = ?2, voided_at = datetime('now'), updated_at = datetime('now') WHERE id = ?3",
+        "UPDATE bills SET status = 'voided', void_reason = ?1, voided_by_user_id = ?2, voided_at = datetime('now'), grand_total_paise = 0, subtotal_paise = 0, updated_at = datetime('now') WHERE id = ?3",
         rusqlite::params![reason.trim(), user_id, bill_id],
     ).map_err(|e| format!("Failed to void bill: {}", e))?;
+    
+    // Zero out payment record
+    let _ = db.conn.execute(
+        "UPDATE payments SET total_amount_paise = 0, cash_amount_paise = 0, upi_amount_paise = 0, card_amount_paise = 0 WHERE bill_id = ?1",
+        rusqlite::params![bill_id],
+    );
     
     // Audit log
     let _ = db.conn.execute(

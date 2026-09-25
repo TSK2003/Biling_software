@@ -22,12 +22,18 @@ pub fn normalize_drive_path(root: &Path) -> (String, PathBuf) {
 
 /// Finds any connected USB drive that contains a Billing security key license.bin
 pub fn find_billing_usb_key() -> Option<USBKeyInfo> {
+    let mut fallback_invalid = None;
+
     // 1. Check all mounted disks reported by sysinfo
     let disks = Disks::new_with_refreshed_list();
     for disk in disks.list() {
         let mount_point = disk.mount_point();
         if let Some(info) = check_drive_for_key(mount_point) {
-            return Some(info);
+            if info.is_valid {
+                return Some(info);
+            } else if fallback_invalid.is_none() {
+                fallback_invalid = Some(info);
+            }
         }
     }
     
@@ -39,13 +45,17 @@ pub fn find_billing_usb_key() -> Option<USBKeyInfo> {
             let path = Path::new(&drive_str);
             if path.exists() {
                 if let Some(info) = check_drive_for_key(path) {
-                    return Some(info);
+                    if info.is_valid {
+                        return Some(info);
+                    } else if fallback_invalid.is_none() {
+                        fallback_invalid = Some(info);
+                    }
                 }
             }
         }
     }
     
-    None
+    fallback_invalid
 }
 
 /// Backwards-compatible alias for find_billing_usb_key

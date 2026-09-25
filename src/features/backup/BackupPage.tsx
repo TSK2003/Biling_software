@@ -61,9 +61,10 @@ export const BackupPage: React.FC = () => {
     try {
       await api.createBackup('manual');
       toast.success('Full application backup snapshot created successfully!');
-      loadBackups();
-    } catch {
-      toast.success('Local backup created in Application Backups directory');
+      await loadBackups();
+    } catch (err: any) {
+      const errMsg = typeof err === 'string' ? err : (err?.message || 'Failed to create backup');
+      toast.error(errMsg);
     } finally {
       setIsCreatingBackup(false);
     }

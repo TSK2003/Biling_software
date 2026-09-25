@@ -72,11 +72,21 @@ export const Sidebar: React.FC = () => {
                 to="/billing"
                 className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
               >
-                <ShoppingCart className="w-5 h-5" />
-                <span>Billing</span>
-                <span className="ml-auto text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded font-mono font-bold">
-                  F2
-                </span>
+                {({ isActive }) => (
+                  <>
+                    <ShoppingCart className="w-5 h-5 flex-shrink-0" />
+                    <span>Billing (POS)</span>
+                    <span
+                      className={`ml-auto text-xs px-2 py-0.5 rounded font-mono font-bold transition-colors ${
+                        isActive
+                          ? 'bg-primary-100 text-primary-700'
+                          : 'bg-surface-100 text-surface-500'
+                      }`}
+                    >
+                      F2
+                    </span>
+                  </>
+                )}
               </NavLink>
             )}
 

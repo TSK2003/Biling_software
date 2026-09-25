@@ -11,10 +11,12 @@ import {
   Wifi,
   Monitor,
   HardDrive,
-  PlusCircle,
+  Server,
+  AlertTriangle,
 } from 'lucide-react';
 import { useLicense } from '../../contexts/LicenseContext';
 import { ClientConnectScreen } from '../network/ClientConnectScreen';
+import { isTauriApp } from '../../lib/ipc';
 
 export const ActivationScreen: React.FC = () => {
   const {
@@ -25,15 +27,14 @@ export const ActivationScreen: React.FC = () => {
     scanForUsb,
     activate,
     activateWithCode,
-    createSecurityKey,
     checkLicense,
   } = useLicense();
 
+  const [activeSetupMode, setActiveSetupMode] = useState<'host' | 'client'>('host');
   const [isActivating, setIsActivating] = useState(false);
-  const [showClientConnect, setShowClientConnect] = useState(false);
   const [showCodeInput, setShowCodeInput] = useState(false);
-  const [activationCode, setActivationCode] = useState('BILLING-PRO-2026');
-  const [shopNameInput, setShopNameInput] = useState('My Shop');
+  const [activationCode, setActivationCode] = useState('');
+  const [shopNameInput, setShopNameInput] = useState('');
   const [selectedDrive, setSelectedDrive] = useState<string>('');
 
   // Auto-scan for USB pen drive every 2.5 seconds
@@ -77,43 +78,59 @@ export const ActivationScreen: React.FC = () => {
     }
   };
 
-  const handleCreateKeyOnDrive = async (driveLetter: string) => {
-    const shop = window.prompt('Enter Shop Name for this Security Pen Drive:', 'My Shop');
-    if (!shop) return;
-    await createSecurityKey(driveLetter, shop);
-  };
-
   const isActivated = status?.state === 'ACTIVE';
 
-  if (showClientConnect) {
+  if (activeSetupMode === 'client') {
     return (
       <ClientConnectScreen
-        onBackToHost={() => setShowClientConnect(false)}
+        onBackToHost={() => setActiveSetupMode('host')}
         onConnected={() => window.location.reload()}
       />
     );
   }
 
   return (
-    <div className="min-h-screen w-screen bg-surface-100 flex items-center justify-center p-4 select-none">
-      <div className="bg-white rounded-2xl shadow-xl border border-surface-200 p-8 max-w-lg w-full text-center">
+    <div className="fixed inset-0 h-full w-full overflow-y-auto overflow-x-hidden bg-surface-100 select-none flex flex-col items-center p-3 sm:p-6 md:p-8">
+      <div className="my-auto bg-white rounded-2xl shadow-xl border border-surface-200 p-5 sm:p-7 max-w-lg w-full text-center transition-all">
         {/* Hardware Security Shield Badge */}
-        <div className="w-16 h-16 rounded-2xl bg-primary-50 text-primary-600 border border-primary-200 flex items-center justify-center mx-auto mb-4 shadow-sm">
+        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-primary-50 text-primary-600 border border-primary-200 flex items-center justify-center mx-auto mb-3 shadow-sm">
           {isActivated ? (
-            <ShieldCheck className="w-8 h-8 text-emerald-600" />
+            <ShieldCheck className="w-7 h-7 sm:w-8 sm:h-8 text-emerald-600" />
           ) : (
-            <ShieldAlert className="w-8 h-8 text-primary-600" />
+            <ShieldAlert className="w-7 h-7 sm:w-8 sm:h-8 text-primary-600" />
           )}
         </div>
 
-        <h2 className="text-2xl font-bold text-surface-900 tracking-tight mb-1">
-          {isActivated ? 'Billing Software Licensed & Active' : 'Security Pen Drive Required'}
+        <h2 className="text-xl sm:text-2xl font-bold text-surface-900 tracking-tight mb-1">
+          {isActivated ? 'Billing Software Licensed & Active' : 'Setup & Security Key Required'}
         </h2>
-        <p className="text-xs text-surface-500 mb-6">
+        <p className="text-xs text-surface-500 mb-3 sm:mb-4 leading-relaxed">
           {isActivated
             ? 'This computer is cryptographically licensed and hardware-bound.'
-            : 'Please insert your authorized Security Pen Drive into this PC to activate.'}
+            : 'To use this terminal, activate with a Security Key or connect to an existing Host PC.'}
         </p>
+
+        {/* 2-Mode Setup Selector */}
+        {!isActivated && (
+          <div className="grid grid-cols-2 gap-2 p-1 bg-surface-100 rounded-xl mb-3 sm:mb-4 border border-surface-200">
+            <button
+              type="button"
+              onClick={() => setActiveSetupMode('host')}
+              className="py-1.5 sm:py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer bg-white text-primary-700 shadow-sm border border-surface-200/80"
+            >
+              <Server className="w-3.5 h-3.5" />
+              <span>Main Host PC</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSetupMode('client')}
+              className="py-1.5 sm:py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer text-surface-600 hover:text-surface-900"
+            >
+              <Wifi className="w-3.5 h-3.5" />
+              <span>Hosting Access (Cashier)</span>
+            </button>
+          </div>
+        )}
 
         {/* State Warning / Error Banner if status is not ACTIVE */}
         {status?.state && status.state !== 'NOT_ACTIVATED' && status.state !== 'ACTIVE' && (
@@ -128,8 +145,19 @@ export const ActivationScreen: React.FC = () => {
           </div>
         )}
 
+        {/* Web Browser Notice */}
+        {!isTauriApp() && (
+          <div className="mb-5 p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-left flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-blue-900 leading-relaxed">
+              <span className="font-bold block text-blue-800">Browser Preview Mode Detected</span>
+              Web browsers cannot access USB hardware directly. Please launch the <b>Desktop Application</b> (run <code className="bg-blue-100 px-1 py-0.5 rounded font-mono text-2xs">npm start</code> or open the installed <b>Billing Software</b> setup) for native Pen Drive detection.
+            </div>
+          </div>
+        )}
+
         {/* USB Pen Drive Detection Card */}
-        <div className="p-4 rounded-xl bg-surface-50 border border-surface-200 mb-5 text-left transition-all">
+        <div className="p-3.5 sm:p-4 rounded-xl bg-surface-50 border border-surface-200 mb-3 sm:mb-4 text-left transition-all">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div
@@ -191,7 +219,7 @@ export const ActivationScreen: React.FC = () => {
                 <span>Waiting for Security Pen Drive to be inserted...</span>
               </div>
               <p className="text-2xs text-surface-400">
-                Insert any authorized Security Pen Drive into this computer.
+                Insert any authorized Security Pen Drive into this computer to activate.
               </p>
             </div>
           )}
@@ -199,7 +227,7 @@ export const ActivationScreen: React.FC = () => {
 
         {/* Connected Storage & USB Drives Discovery */}
         {drives.length > 0 && (
-          <div className="mb-5 p-3.5 rounded-xl bg-surface-50 border border-surface-200 text-left">
+          <div className="mb-3 sm:mb-4 p-3 sm:p-3.5 rounded-xl bg-surface-50 border border-surface-200 text-left">
             <div className="flex items-center justify-between mb-2">
               <span className="text-2xs uppercase tracking-wider font-bold text-surface-500 flex items-center gap-1.5">
                 <HardDrive className="w-3.5 h-3.5" />
@@ -241,19 +269,11 @@ export const ActivationScreen: React.FC = () => {
                         <span className="text-2xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold border border-emerald-200">
                           Security Key Ready
                         </span>
-                      ) : d.is_removable ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCreateKeyOnDrive(d.letter);
-                          }}
-                          className="text-2xs bg-surface-100 hover:bg-surface-200 text-surface-700 px-2.5 py-0.5 rounded-full font-semibold border border-surface-300 flex items-center gap-1 cursor-pointer"
-                        >
-                          <PlusCircle className="w-3 h-3" />
-                          <span>Make Key</span>
-                        </button>
-                      ) : null}
+                      ) : (
+                        <span className="text-2xs text-surface-400 font-mono">
+                          {d.total_gb > 0 ? `${d.total_gb} GB` : 'No Key'}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
@@ -295,7 +315,7 @@ export const ActivationScreen: React.FC = () => {
 
         {/* Manual License Key Entry Option */}
         {!isActivated && (
-          <div className="mt-4">
+          <div className="mt-3">
             {!showCodeInput ? (
               <button
                 type="button"
@@ -305,7 +325,7 @@ export const ActivationScreen: React.FC = () => {
                 Or activate using a License Code
               </button>
             ) : (
-              <form onSubmit={handleActivateWithCode} className="mt-3 p-3.5 rounded-xl bg-surface-50 border border-surface-200 text-left space-y-2.5">
+              <form onSubmit={handleActivateWithCode} className="mt-2.5 p-3 rounded-xl bg-surface-50 border border-surface-200 text-left space-y-2">
                 <div className="text-xs font-bold text-surface-800 flex items-center justify-between">
                   <span>Enter License Key</span>
                   <button
@@ -318,22 +338,24 @@ export const ActivationScreen: React.FC = () => {
                 </div>
                 <input
                   type="text"
-                  placeholder="Shop Name"
+                  placeholder="Enter Registered Shop Name"
                   value={shopNameInput}
                   onChange={(e) => setShopNameInput(e.target.value)}
-                  className="input w-full h-9 text-xs"
+                  className="input w-full h-8 sm:h-9 text-xs"
+                  required
                 />
                 <input
                   type="text"
-                  placeholder="e.g. BILLING-PRO-2026"
+                  placeholder="Enter License Key (e.g. KEY-XXXX-XXXX)"
                   value={activationCode}
                   onChange={(e) => setActivationCode(e.target.value)}
-                  className="input w-full h-9 text-xs font-mono"
+                  className="input w-full h-8 sm:h-9 text-xs font-mono"
+                  required
                 />
                 <button
                   type="submit"
-                  disabled={isActivating || !activationCode.trim()}
-                  className="btn-primary w-full h-9 text-xs font-semibold flex items-center justify-center gap-1.5"
+                  disabled={isActivating || !activationCode.trim() || !shopNameInput.trim()}
+                  className="btn-primary w-full h-8 sm:h-9 text-xs font-semibold flex items-center justify-center gap-1.5"
                 >
                   <Key className="w-3.5 h-3.5" />
                   <span>Activate with Code</span>
@@ -345,8 +367,8 @@ export const ActivationScreen: React.FC = () => {
 
         {/* Secondary Cashier Terminal Option */}
         {!isActivated && (
-          <div className="mt-5 pt-5 border-t border-surface-200">
-            <div className="flex items-center gap-2 justify-center mb-2.5">
+          <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-surface-200">
+            <div className="flex items-center gap-2 justify-center mb-2">
               <div className="h-px flex-1 bg-surface-200" />
               <span className="text-3xs uppercase tracking-wider text-surface-400 font-semibold">
                 or connect as cashier terminal
@@ -354,26 +376,26 @@ export const ActivationScreen: React.FC = () => {
               <div className="h-px flex-1 bg-surface-200" />
             </div>
 
-            <p className="text-2xs text-surface-500 mb-3">
-              If this is a secondary cashier / billing terminal, connect to the Main Host PC over your local Wi-Fi or Ethernet network.
+            <p className="text-2xs text-surface-500 mb-2.5">
+              If this is a secondary cashier terminal, connect to the Main Host PC over your local Wi-Fi or Ethernet network.
             </p>
 
             <button
               type="button"
-              onClick={() => setShowClientConnect(true)}
-              className="w-full h-10 rounded-xl border border-dashed border-primary-300 bg-primary-50/50 text-primary-700
+              onClick={() => setActiveSetupMode('client')}
+              className="w-full h-9 sm:h-10 rounded-xl border border-dashed border-primary-300 bg-primary-50/50 text-primary-700
                          flex items-center justify-center gap-2 text-xs font-semibold
                          hover:bg-primary-100/60 hover:border-primary-400 transition cursor-pointer"
             >
               <Wifi className="w-4 h-4" />
-              <span>Connect to Main Host PC</span>
+              <span>Connect to Main Host PC (Hosting Access)</span>
               <Monitor className="w-3.5 h-3.5 opacity-60" />
             </button>
           </div>
         )}
 
-        <div className="mt-6 pt-4 border-t border-surface-100 text-2xs text-surface-400">
-          Billing Software • Complete Hardware Cryptographic Security
+        <div className="mt-3 sm:mt-4 pt-2.5 sm:pt-3 border-t border-surface-100 text-2xs text-surface-400">
+          Billing Software • Hardware Cryptographic Security & Local Network Integration
         </div>
       </div>
     </div>

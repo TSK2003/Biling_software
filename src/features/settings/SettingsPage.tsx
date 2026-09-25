@@ -18,8 +18,7 @@ import {
   RefreshCw,
   Upload,
   Trash2,
-  Usb,
-  Key,
+  ShieldCheck,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
 import { Header } from '../../components/Header';
@@ -41,7 +40,7 @@ export const SettingsPage: React.FC = () => {
   } = useNetwork();
 
   const [activeTab, setActiveTab] = useState<
-    'shop' | 'gst' | 'printer' | 'gdrive' | 'network' | 'license'
+    'shop' | 'gst' | 'printer' | 'gdrive' | 'network' | 'license' | 'danger'
   >('shop');
   const [isSetupModalOpen, setIsSetupModalOpen] = useState(false);
 
@@ -49,6 +48,9 @@ export const SettingsPage: React.FC = () => {
   const [shopName, setShopName] = useState(settings['shop_name'] || 'My Shop');
   const [shopPhone, setShopPhone] = useState(settings['shop_phone'] || '');
   const [shopAddress, setShopAddress] = useState(settings['shop_address'] || '');
+  const [shopEmail, setShopEmail] = useState(settings['shop_email'] || '');
+  const [fssaiNumber, setFssaiNumber] = useState(settings['fssai_number'] || '');
+  const [receiptFooter, setReceiptFooter] = useState(settings['receipt_footer_note'] || 'Thank you for shopping with us! Please visit again.');
   const [currencySymbol, setCurrencySymbol] = useState(settings['currency_symbol'] || '₹');
   const [shopLogo, setShopLogo] = useState(settings['shop_logo'] || '');
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -57,7 +59,7 @@ export const SettingsPage: React.FC = () => {
   const [gstNumber, setGstNumber] = useState(settings['gst_number'] || '');
   const [gstDefaultPct, setGstDefaultPct] = useState(settings['gst_default_percentage'] || '500');
 
-  const [printerPaper, setPrinterPaper] = useState(settings['printer_paper_size'] || 'A4');
+  const [printerPaper, setPrinterPaper] = useState(settings['printer_paper_size'] || 'Thermal80');
   const [printerCopies, setPrinterCopies] = useState(settings['printer_copies'] || '1');
   const [defaultPayment, setDefaultPayment] = useState(settings['default_payment_method'] || 'cash');
 
@@ -65,28 +67,12 @@ export const SettingsPage: React.FC = () => {
   const [driveFolderId, setDriveFolderId] = useState(settings['gdrive_folder_id'] || '');
   const [autoDriveSync, setAutoDriveSync] = useState(settings['gdrive_auto_sync'] === 'true');
 
-  const [usbDriveLetter, setUsbDriveLetter] = useState('E:');
-  const [usbShopName, setUsbShopName] = useState(settings['shop_name'] || 'Authorized Shop');
-  const [isWritingUsb, setIsWritingUsb] = useState(false);
+  // Factory Reset State
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
 
   const [isSaving, setIsSaving] = useState(false);
-
-  const handleCreateSecurityUsb = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!usbDriveLetter.trim() || !usbShopName.trim()) {
-      toast.error('Drive letter and Shop Name are required');
-      return;
-    }
-    setIsWritingUsb(true);
-    try {
-      const msg = await api.createSecurityUsbKey(usbDriveLetter.trim(), usbShopName.trim(), 'perpetual');
-      toast.success(msg || 'Security Pen Drive created successfully!');
-    } catch (err: any) {
-      toast.error(typeof err === 'string' ? err : 'Failed to create Security USB key');
-    } finally {
-      setIsWritingUsb(false);
-    }
-  };
 
   const handleDeactivateDevice = async () => {
     if (window.confirm('Are you sure you want to deactivate this device? It will strictly require the Security Pen Drive to re-activate.')) {
@@ -124,15 +110,39 @@ export const SettingsPage: React.FC = () => {
       await updateSetting('shop_name', shopName.trim());
       await updateSetting('shop_phone', shopPhone.trim());
       await updateSetting('shop_address', shopAddress.trim());
+      await updateSetting('shop_email', shopEmail.trim());
+      await updateSetting('fssai_number', fssaiNumber.trim());
+      await updateSetting('receipt_footer_note', receiptFooter.trim());
       await updateSetting('currency_symbol', currencySymbol.trim());
       await updateSetting('default_payment_method', defaultPayment);
       await updateSetting('shop_logo', shopLogo);
       await reloadSettings();
-      toast.success('Shop settings and logo updated successfully');
+      toast.success('Shop profile & receipt details updated successfully');
     } catch {
       toast.error('Failed to save settings');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleFactoryReset = async () => {
+    if (resetConfirmText.trim().toUpperCase() !== 'RESET') {
+      toast.error('Please type "RESET" to confirm data wipe');
+      return;
+    }
+    setIsResetting(true);
+    try {
+      await api.clearAllBusinessData();
+      toast.success('All bills, products, and old business data wiped successfully!');
+      setIsResetConfirmOpen(false);
+      setResetConfirmText('');
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (err: any) {
+      toast.error(typeof err === 'string' ? err : 'Reset failed');
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -271,6 +281,18 @@ export const SettingsPage: React.FC = () => {
             <Shield className="w-3.5 h-3.5" />
             <span>License & Security</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('danger')}
+            className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-colors ${
+              activeTab === 'danger'
+                ? 'bg-red-600 text-white shadow-xs'
+                : 'text-red-600 hover:bg-red-50'
+            }`}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Reset Data</span>
+          </button>
         </div>
 
         {/* Tab 1: Shop Profile */}
@@ -342,7 +364,7 @@ export const SettingsPage: React.FC = () => {
                   type="text"
                   value={shopPhone}
                   onChange={(e) => setShopPhone(e.target.value)}
-                  placeholder="e.g. +91 XXXXXXXXXX"
+                  placeholder="Contact Phone Number"
                   className="form-input"
                 />
               </div>
@@ -353,10 +375,48 @@ export const SettingsPage: React.FC = () => {
               <textarea
                 value={shopAddress}
                 onChange={(e) => setShopAddress(e.target.value)}
-                placeholder="Shop address displayed on print receipts"
+                placeholder="Shop Address"
                 rows={2}
                 className="form-input resize-none"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="form-group">
+                <label className="form-label">Shop Email (Optional)</label>
+                <input
+                  type="email"
+                  value={shopEmail}
+                  onChange={(e) => setShopEmail(e.target.value)}
+                  placeholder="contact@myshop.com"
+                  className="form-input"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">FSSAI / Shop License No (Optional)</label>
+                <input
+                  type="text"
+                  value={fssaiNumber}
+                  onChange={(e) => setFssaiNumber(e.target.value)}
+                  placeholder="FSSAI License / Registration No"
+                  className="form-input font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Receipt Footer Message</label>
+              <input
+                type="text"
+                value={receiptFooter}
+                onChange={(e) => setReceiptFooter(e.target.value)}
+                placeholder="Thank you for shopping with us! Please visit again."
+                className="form-input"
+              />
+              <p className="text-2xs text-surface-500 mt-0.5">
+                Printed at the bottom of all customer thermal and paper receipts.
+              </p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -436,7 +496,7 @@ export const SettingsPage: React.FC = () => {
                     type="text"
                     value={gstNumber}
                     onChange={(e) => setGstNumber(e.target.value)}
-                    placeholder="e.g. XXAAAA0000A1ZX"
+                    placeholder="GSTIN (e.g. 22AAAAA0000A1Z5)"
                     className="form-input font-mono uppercase"
                   />
                 </div>
@@ -486,9 +546,9 @@ export const SettingsPage: React.FC = () => {
                   onChange={(e) => setPrinterPaper(e.target.value)}
                   className="form-select"
                 >
+                  <option value="Thermal80">Thermal Receipt (80mm / 3 inch) — Standard POS</option>
+                  <option value="Thermal58">Thermal Receipt (58mm / 2 inch) — Mini Thermal Printer</option>
                   <option value="A4">Standard A4 Sheet</option>
-                  <option value="Thermal80">Thermal Receipt (80mm)</option>
-                  <option value="Thermal58">Thermal Receipt (58mm)</option>
                 </select>
               </div>
 
@@ -552,7 +612,7 @@ export const SettingsPage: React.FC = () => {
                     type="text"
                     value={driveFolderId}
                     onChange={(e) => setDriveFolderId(e.target.value)}
-                    placeholder="https://drive.google.com/drive/folders/... or Folder ID"
+                    placeholder="Google Drive Folder ID or Link"
                     className="form-input pl-9 text-xs font-mono"
                   />
                 </div>
@@ -643,11 +703,26 @@ export const SettingsPage: React.FC = () => {
 
               {/* Network Parameters Grid */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <div className="p-3 rounded-lg bg-surface-50 border border-surface-200">
-                  <div className="text-2xs text-surface-500 font-medium">Host LAN Address</div>
-                  <div className="font-mono text-xs font-bold text-surface-900 mt-0.5">
-                    {networkInfo?.host_ip || '127.0.0.1'}
+                <div className="p-3 rounded-lg bg-surface-50 border border-surface-200 flex items-center justify-between">
+                  <div>
+                    <div className="text-2xs text-surface-500 font-medium">Host LAN IP</div>
+                    <div className="font-mono text-xs font-bold text-surface-900 mt-0.5">
+                      {networkInfo?.host_ip || '127.0.0.1'}
+                    </div>
                   </div>
+                  {networkInfo?.host_ip && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(networkInfo.host_ip);
+                        toast.success('Host IP copied!');
+                      }}
+                      className="p-1.5 rounded hover:bg-surface-200 text-surface-600 transition-colors"
+                      title="Copy Host IP"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 <div className="p-3 rounded-lg bg-surface-50 border border-surface-200">
@@ -660,29 +735,59 @@ export const SettingsPage: React.FC = () => {
                 <div className="p-3 rounded-lg bg-surface-50 border border-surface-200">
                   <div className="text-2xs text-surface-500 font-medium">Shop Identifier</div>
                   <div className="font-mono text-xs font-bold text-primary-700 mt-0.5 truncate">
-                    {networkInfo?.shop_id || 'SHOP-BILLING-000001'}
+                    {networkInfo?.shop_id || '—'}
                   </div>
                 </div>
 
                 <div className="p-3 rounded-lg bg-primary-50/50 border border-primary-200 flex items-center justify-between">
                   <div>
-                    <div className="text-2xs text-primary-700 font-semibold">Connection Code</div>
+                    <div className="text-2xs text-primary-700 font-semibold">Connection PIN</div>
                     <div className="font-mono text-xs font-extrabold text-primary-900 tracking-wider mt-0.5">
-                      {networkInfo?.connection_code || 'BILLING-884920'}
+                      {networkInfo?.connection_code || '—'}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(networkInfo?.connection_code || '');
-                      toast.success('Connection code copied to clipboard!');
-                    }}
-                    className="p-1.5 rounded hover:bg-primary-100 text-primary-700 transition-colors"
-                    title="Copy connection code"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
+                  {networkInfo?.connection_code && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(networkInfo.connection_code);
+                        toast.success('Connection PIN copied to clipboard!');
+                      }}
+                      className="p-1.5 rounded hover:bg-primary-100 text-primary-700 transition-colors"
+                      title="Copy Connection PIN"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
+              </div>
+
+              {/* Multi-Adapter and Firewall Setup Bar */}
+              <div className="pt-2 border-t border-surface-100 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-2xs text-surface-500">
+                  {networkInfo?.available_ips && networkInfo.available_ips.length > 1 ? (
+                    <span>Other available network IPs: <span className="font-mono font-medium text-surface-700">{networkInfo.available_ips.slice(1).join(', ')}</span></span>
+                  ) : (
+                    <span>Secondary cashiers connect using this Host IP & PIN on local Wi-Fi / LAN.</span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const msg = await api.setupFirewallRules();
+                      toast.success(msg);
+                    } catch (e: any) {
+                      toast.error(typeof e === 'string' ? e : 'Firewall configuration note: Please allow port 4123 in Windows Defender Firewall.');
+                    }
+                  }}
+                  className="btn-secondary h-7 px-2.5 text-2xs flex items-center gap-1.5 font-semibold text-primary-700"
+                  title="Configure Windows Defender Firewall rules for port 4123 & 4124"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Configure Windows Firewall</span>
+                </button>
               </div>
             </div>
 
@@ -832,66 +937,6 @@ export const SettingsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Admin Tool: Create Security Pen Drive for Customer */}
-            <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200 space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
-                  <Usb className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-bold text-blue-950">Security Pen Drive Creator</h4>
-                  <p className="text-3xs text-blue-700">Write cryptographic offline license key to any connected USB drive</p>
-                </div>
-              </div>
-
-              <form onSubmit={handleCreateSecurityUsb} className="space-y-2.5 pt-1">
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div className="form-group">
-                    <label className="form-label text-2xs font-semibold text-blue-900">USB Drive Letter</label>
-                    <input
-                      type="text"
-                      value={usbDriveLetter}
-                      onChange={(e) => setUsbDriveLetter(e.target.value.toUpperCase())}
-                      placeholder="e.g. E: or F:"
-                      className="form-input font-mono uppercase text-xs h-8 bg-white"
-                      required
-                    />
-                  </div>
-                  <div className="col-span-2 form-group">
-                    <label className="form-label text-2xs font-semibold text-blue-900">Customer Shop Name</label>
-                    <input
-                      type="text"
-                      value={usbShopName}
-                      onChange={(e) => setUsbShopName(e.target.value)}
-                      placeholder="e.g. Your Shop Name"
-                      className="form-input text-xs h-8 bg-white"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="submit"
-                    disabled={isWritingUsb}
-                    className="btn-primary text-xs h-8 flex items-center gap-1.5"
-                  >
-                    {isWritingUsb ? (
-                      <>
-                        <div className="spinner w-3.5 h-3.5 border-white" />
-                        <span>Signing & Writing Key...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Key className="w-3.5 h-3.5" />
-                        <span>Format & Create Security Pen Drive</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-
             <div className="p-3 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
               <div>
@@ -911,7 +956,108 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Tab 7: Factory Reset & Wipe Data */}
+        {activeTab === 'danger' && (
+          <div className="card p-5 space-y-4 bg-white border border-red-200">
+            <div className="border-b border-red-100 pb-3">
+              <h3 className="text-sm font-bold text-red-700 flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-red-600" />
+                <span>Factory Reset & Clean Data Wipe</span>
+              </h3>
+              <p className="text-2xs text-surface-500 mt-1">
+                Erase all shop data, transactions, inventory, and categories to start with a fresh, empty application.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-red-50 border border-red-200 space-y-3">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-red-900 space-y-1">
+                  <p className="font-bold">Warning: This action is permanent and cannot be undone!</p>
+                  <p className="text-red-700">
+                    Executing this reset will permanently delete:
+                  </p>
+                  <ul className="list-disc list-inside text-2xs text-red-800 space-y-0.5 pl-1">
+                    <li>All past customer bills, invoices, and sales history</li>
+                    <li>All payment records (Cash, UPI, Card)</li>
+                    <li>All products, stock inventory counts, and category re-ordering</li>
+                    <li>Draft carts and cashier counters</li>
+                    <li>Bill sequence counter will restart cleanly from #1</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-between">
+              <div className="text-2xs text-surface-500">
+                Tip: If you want to keep records, go to <b>Backup & Import</b> to download an export before resetting.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetConfirmText('');
+                  setIsResetConfirmOpen(true);
+                }}
+                className="btn-danger text-xs h-9 px-4 flex items-center gap-2 shadow-xs"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Reset All Business Data</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Wipe / Factory Reset Confirmation Modal */}
+      {isResetConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-surface-950/70 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-red-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <h3 className="text-base font-bold text-center text-surface-950">
+              Confirm Complete Data Wipe
+            </h3>
+            <p className="text-xs text-center text-surface-600 mt-2">
+              This will completely wipe all bills, customers, products, inventory, and transactions from this computer.
+            </p>
+
+            <div className="mt-4 p-3 bg-red-50 rounded-lg border border-red-200 text-2xs text-red-800 text-center font-medium">
+              To proceed, please type <span className="font-mono font-bold text-red-700 bg-red-100 px-1.5 py-0.5 rounded">RESET</span> below:
+            </div>
+
+            <input
+              type="text"
+              value={resetConfirmText}
+              onChange={(e) => setResetConfirmText(e.target.value)}
+              placeholder="Type RESET to confirm"
+              className="mt-3 form-input text-center font-mono font-bold tracking-widest text-sm"
+              autoFocus
+            />
+
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setIsResetConfirmOpen(false)}
+                disabled={isResetting}
+                className="btn-secondary flex-1 py-2 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleFactoryReset}
+                disabled={resetConfirmText !== 'RESET' || isResetting}
+                className="btn-danger flex-1 py-2 text-xs font-bold disabled:opacity-50"
+              >
+                {isResetting ? 'Wiping Data...' : 'Permanently Wipe Data'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SetupModeModal
         isOpen={isSetupModalOpen}

@@ -25,7 +25,10 @@ pub fn parse_user_permissions(role: &str, permissions_json: Option<String>) -> V
         "inventory_staff" => vec![
             "products".into(), "categories".into(), "dashboard".into(),
         ],
-        _ => vec!["billing".into(), "bills".into()], // cashier / staff default
+        _ => vec![
+            "billing".into(), "bills".into(), "dashboard".into(),
+            "products".into(), "categories".into(), "reports".into(),
+        ], // cashier / staff default: full POS + catalog + dashboard + reports
     }
 }
 
@@ -81,8 +84,8 @@ pub fn create_user(
     if username.is_empty() || display_name.is_empty() || password.is_empty() {
         return Err("Username, display name, and password are required".to_string());
     }
-    if password.len() < 4 {
-        return Err("Password must be at least 4 characters".to_string());
+    if password.len() < 6 || password.len() > 10 {
+        return Err("Password must be between 6 and 10 characters".to_string());
     }
     
     let role = if role.trim().is_empty() {
@@ -182,12 +185,16 @@ pub fn update_user(
             .map_err(|e| format!("Update permissions failed: {}", e))?;
     }
     if let Some(ref pwd) = new_password {
-        if !pwd.trim().is_empty() {
+        let p = pwd.trim();
+        if !p.is_empty() {
+            if p.len() < 6 || p.len() > 10 {
+                return Err("Password must be between 6 and 10 characters".to_string());
+            }
             use argon2::{Argon2, password_hash::{rand_core::OsRng, PasswordHasher, SaltString}};
             let salt = SaltString::generate(&mut OsRng);
-            let hash = Argon2::default().hash_password(pwd.as_bytes(), &salt)
+            let hash = Argon2::default().hash_password(p.as_bytes(), &salt)
                 .map_err(|e| format!("Password hashing failed: {}", e))?.to_string();
-            db.conn.execute("UPDATE users SET password_hash = ?1, plain_password = ?2, updated_at = datetime('now') WHERE id = ?3", rusqlite::params![hash, pwd, id])
+            db.conn.execute("UPDATE users SET password_hash = ?1, plain_password = ?2, updated_at = datetime('now') WHERE id = ?3", rusqlite::params![hash, p, id])
                 .map_err(|e| format!("Update password failed: {}", e))?;
         }
     }
@@ -218,7 +225,16 @@ pub fn delete_user(state: State<'_, AppState>, id: i64) -> Result<(), String> {
         return Err("Cannot delete the last admin user account".to_string());
     }
     
-    // Hard delete user from database
+    // Safely reassign any past bills and void records created by this user to primary admin (id = 1)
+    // This preserves full financial audit history while satisfying SQLite foreign key RESTRICT constraints
+    let _ = db.conn.execute("UPDATE bills SET user_id = 1 WHERE user_id = ?1", rusqlite::params![id]);
+    let _ = db.conn.execute("UPDATE bills SET voided_by_user_id = 1 WHERE voided_by_user_id = ?1", rusqlite::params![id]);
+
+    // Clean up dependent child records
+    let _ = db.conn.execute("DELETE FROM draft_bills WHERE user_id = ?1", rusqlite::params![id]);
+    let _ = db.conn.execute("DELETE FROM user_roles WHERE user_id = ?1", rusqlite::params![id]);
+    
+    // Delete user from database
     db.conn.execute("DELETE FROM users WHERE id = ?1", rusqlite::params![id])
         .map_err(|e| format!("Delete failed: {}", e))?;
     

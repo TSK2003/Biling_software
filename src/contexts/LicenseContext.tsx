@@ -14,7 +14,6 @@ interface LicenseContextType {
   scanForUsb: () => Promise<USBKeyInfo | null>;
   activate: (driveLetter: string) => Promise<boolean>;
   activateWithCode: (code: string, shopName?: string) => Promise<boolean>;
-  createSecurityKey: (driveLetter: string, shopName: string) => Promise<boolean>;
   deactivate: () => Promise<boolean>;
   isActivated: boolean;
 }
@@ -58,8 +57,8 @@ export const LicenseProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setDetectedUsb(usb);
       setDrives(allDrives);
 
-      // If detectUsbKey didn't pick up a key but one of the drives has a valid key, pick it up!
-      if (!usb && allDrives.length > 0) {
+      // If detectUsbKey didn't pick up a valid key but one of the drives has a valid key, pick it up!
+      if ((!usb || !usb.is_valid) && allDrives.length > 0) {
         const driveWithKey = allDrives.find((d) => d.has_key && d.key_info?.is_valid);
         if (driveWithKey && driveWithKey.key_info) {
           setDetectedUsb(driveWithKey.key_info);
@@ -110,18 +109,6 @@ export const LicenseProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const createSecurityKey = async (driveLetter: string, shopName: string): Promise<boolean> => {
-    try {
-      const msg = await api.createSecurityUsbKey(driveLetter, shopName, 'perpetual');
-      toast.success(msg || 'Security Key created on drive!');
-      await scanForUsb();
-      return true;
-    } catch (err: any) {
-      toast.error(typeof err === 'string' ? err : 'Failed to create security key on drive');
-      return false;
-    }
-  };
-
   const deactivate = async (): Promise<boolean> => {
     try {
       if (isTauri) {
@@ -153,7 +140,6 @@ export const LicenseProvider: React.FC<{ children: React.ReactNode }> = ({ child
         scanForUsb,
         activate,
         activateWithCode,
-        createSecurityKey,
         deactivate,
         isActivated: status?.state === 'ACTIVE',
       }}

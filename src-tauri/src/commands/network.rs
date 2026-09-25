@@ -3,6 +3,44 @@ use crate::AppState;
 use crate::models::{Device, DiscoveredHost, InventoryItem, NetworkInfo, StockMovement};
 use crate::network::discovery::discover_hosts_on_lan;
 
+/// Resolves true LAN IPv4 addresses, ignoring loopback (127.0.0.1) and APIPA link-local (169.254.x.x)
+pub fn get_active_lan_ips() -> (String, Vec<String>) {
+    let mut lan_ips = Vec::new();
+
+    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+        for (_name, ip) in interfaces {
+            if let std::net::IpAddr::V4(ipv4) = ip {
+                let octets = ipv4.octets();
+                // Skip loopback (127.x.x.x), APIPA link-local (169.254.x.x), 0.0.0.0, and 255.255.255.255
+                if ipv4.is_loopback() || (octets[0] == 169 && octets[1] == 254) || octets[0] == 255 || octets[0] == 0 {
+                    continue;
+                }
+                let ip_str = ipv4.to_string();
+                if !lan_ips.contains(&ip_str) {
+                    // Prioritize 192.168.x.x (standard Wi-Fi/Ethernet LAN)
+                    if octets[0] == 192 && octets[1] == 168 {
+                        lan_ips.insert(0, ip_str);
+                    } else if octets[0] == 10 {
+                        lan_ips.push(ip_str);
+                    } else if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+                        lan_ips.push(ip_str);
+                    } else {
+                        lan_ips.push(ip_str);
+                    }
+                }
+            }
+        }
+    }
+
+    let primary_ip = lan_ips.first().cloned().unwrap_or_else(|| {
+        local_ip_address::local_ip()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|_| "127.0.0.1".to_string())
+    });
+
+    (primary_ip, lan_ips)
+}
+
 #[tauri::command]
 pub fn get_network_info(state: State<'_, AppState>) -> Result<NetworkInfo, String> {
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
@@ -39,9 +77,7 @@ pub fn get_network_info(state: State<'_, AppState>) -> Result<NetworkInfo, Strin
     .parse()
     .unwrap_or(4123);
 
-    let detected_ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "127.0.0.1".to_string());
+    let (detected_ip, all_ips) = get_active_lan_ips();
 
     let host_ip = if mode == "client" {
         db.conn.query_row(
@@ -89,6 +125,7 @@ pub fn get_network_info(state: State<'_, AppState>) -> Result<NetworkInfo, Strin
         device_name,
         is_approved: true,
         client_count,
+        available_ips: all_ips,
     })
 }
 
@@ -402,4 +439,48 @@ pub fn get_stock_movements(state: State<'_, AppState>, product_id: Option<i64>) 
     .collect();
 
     Ok(movements)
+}
+
+#[tauri::command]
+pub fn setup_firewall_rules() -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let output_tcp = Command::new("netsh")
+            .args(&[
+                "advfirewall", "firewall", "add", "rule",
+                "name=Billing Software Host Service",
+                "dir=in",
+                "action=allow",
+                "protocol=TCP",
+                "localport=4123",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+
+        let _ = Command::new("netsh")
+            .args(&[
+                "advfirewall", "firewall", "add", "rule",
+                "name=Billing Software UDP Discovery",
+                "dir=in",
+                "action=allow",
+                "protocol=UDP",
+                "localport=4124",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+
+        match output_tcp {
+            Ok(o) if o.status.success() => Ok("Firewall rules for port 4123 & 4124 configured successfully.".to_string()),
+            Ok(_) => Ok("Firewall command executed. Please verify Windows Firewall allows port 4123 TCP if connections fail.".to_string()),
+            Err(e) => Err(format!("Could not execute netsh: {}", e)),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok("Non-Windows OS: ensure port 4123 (TCP) and 4124 (UDP) are open in local firewall.".to_string())
+    }
 }

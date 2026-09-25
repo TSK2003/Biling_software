@@ -73,3 +73,43 @@ export function getTodayDateString(): string {
   const d = String(now.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
 }
+
+/**
+ * Converts paise to Indian Rupee amount in words (e.g. 70035 -> "Rupees Seven Hundred and Thirty-Five Paise Only")
+ */
+export function amountInWordsINR(paise: number): string {
+  const totalRupees = Math.floor(paise / 100);
+  const remainingPaise = Math.round(paise % 100);
+
+  if (totalRupees === 0 && remainingPaise === 0) return 'Rupees Zero Only';
+
+  const ones = [
+    '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+    'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
+    'Seventeen', 'Eighteen', 'Nineteen'
+  ];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  function numToWords(n: number): string {
+    if (n === 0) return '';
+    if (n < 20) return ones[n] + ' ';
+    if (n < 100) return tens[Math.floor(n / 10)] + ' ' + (n % 10 !== 0 ? ones[n % 10] + ' ' : '');
+    if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred ' + numToWords(n % 100);
+    if (n < 100000) return numToWords(Math.floor(n / 1000)) + 'Thousand ' + numToWords(n % 1000);
+    if (n < 10000000) return numToWords(Math.floor(n / 100000)) + 'Lakh ' + numToWords(n % 100000);
+    return numToWords(Math.floor(n / 10000000)) + 'Crore ' + numToWords(n % 10000000);
+  }
+
+  let words = 'Rupees ';
+  if (totalRupees > 0) {
+    words += numToWords(totalRupees).trim();
+  } else {
+    words += 'Zero';
+  }
+
+  if (remainingPaise > 0) {
+    words += ' and ' + numToWords(remainingPaise).trim() + ' Paise';
+  }
+
+  return words + ' Only';
+}

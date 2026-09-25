@@ -152,9 +152,12 @@ export interface BillDetail {
 
 export interface CompleteBillResponse {
   bill_id: number;
+  bill_uuid?: string;
   bill_number: number;
   business_date: string;
+  bill_time?: string;
   grand_total_paise: number;
+  change_due_paise: number;
 }
 
 // Dashboard Types
@@ -267,6 +270,7 @@ export interface NetworkInfo {
   device_name: string;
   is_approved: boolean;
   client_count: number;
+  available_ips?: string[];
 }
 
 export interface DiscoveredHost {

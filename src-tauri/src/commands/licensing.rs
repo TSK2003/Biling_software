@@ -149,15 +149,3 @@ pub fn deactivate_license(state: State<'_, AppState>) -> Result<(), String> {
 
     Ok(())
 }
-
-/// Admin tool to write and format an official Security USB Pen Drive for any shop
-#[tauri::command]
-pub fn create_security_usb_key(drive_letter: String, shop_name: String, license_type: Option<String>) -> Result<String, String> {
-    let drive_path = Path::new(&drive_letter);
-    if !drive_path.exists() {
-        return Err(format!("Drive {:?} not found or disconnected", drive_path));
-    }
-    
-    let l_type = license_type.unwrap_or_else(|| "perpetual".to_string());
-    licensing_service::write_usb_security_key(drive_path, &shop_name, &l_type)
-}

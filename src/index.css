@@ -33,6 +33,14 @@
     -webkit-user-select: none;
   }
 
+  /* Suppress Microsoft Edge / WebView2 default password reveal button to prevent duplicate eye icons */
+  input[type="password"]::-ms-reveal,
+  input[type="password"]::-ms-clear {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+
   /* Scrollbar styling */
   ::-webkit-scrollbar {
     width: 6px;
@@ -266,26 +274,26 @@
     @apply p-6 overflow-y-auto flex-1;
   }
 
-  /* Product card (for billing screen) — responsive & clean */
+  /* Product card (for billing screen) — large & touch-friendly */
   .product-card {
-    @apply card p-2.5 cursor-pointer hover:shadow-md hover:border-primary-400 
-           transition-all duration-150 active:scale-[0.98] bg-white rounded-xl border border-surface-200;
+    @apply card p-3.5 cursor-pointer hover:shadow-lg hover:border-primary-500 
+           transition-all duration-150 active:scale-[0.98] bg-white rounded-2xl border-2 border-surface-200/80;
   }
 
   .product-card-image {
-    @apply w-full aspect-[4/3] rounded-lg bg-surface-100 object-cover mb-2;
+    @apply w-full aspect-[4/3] rounded-xl bg-surface-100 object-cover mb-2.5;
   }
 
   .product-card-name {
-    @apply text-sm font-bold text-surface-900 truncate leading-snug;
+    @apply text-base font-bold text-surface-900 truncate leading-snug;
   }
 
   .product-card-price {
-    @apply text-base font-bold text-primary-700;
+    @apply text-lg font-extrabold text-primary-700 font-mono;
   }
 
   .product-card-code {
-    @apply text-xs font-mono text-surface-400 truncate tracking-wide;
+    @apply text-xs font-mono text-surface-500 truncate tracking-wide font-medium;
   }
 
   /* Cart item */
@@ -293,30 +301,30 @@
     @apply flex items-center gap-3 px-3 py-2 border-b border-surface-100 last:border-0;
   }
 
-  /* Quantity controls — slightly bigger */
+  /* Quantity controls — enlarged for fast cashier counter tapping */
   .qty-control {
-    @apply inline-flex items-center border border-surface-300 rounded overflow-hidden;
+    @apply inline-flex items-center border-2 border-surface-300 rounded-lg overflow-hidden;
   }
 
   .qty-btn {
-    @apply w-8 h-8 flex items-center justify-center text-surface-600 
-           hover:bg-surface-100 active:bg-surface-200 transition-colors;
+    @apply w-10 h-10 flex items-center justify-center text-surface-700 
+           hover:bg-primary-50 hover:text-primary-700 active:bg-primary-100 transition-colors;
   }
 
   .qty-input {
-    @apply w-12 h-8 text-center text-sm border-x border-surface-300 
+    @apply w-14 h-10 text-center text-base font-bold font-mono border-x-2 border-surface-300 
            focus:outline-none focus:bg-primary-50;
   }
 
-  /* Category tabs — bigger */
+  /* Category tabs — enlarged */
   .category-tab {
-    @apply px-4 py-2 text-sm font-medium rounded-full border border-surface-200 
-           text-surface-600 hover:bg-surface-50 cursor-pointer transition-colors 
-           whitespace-nowrap;
+    @apply px-5 py-2.5 text-base font-semibold rounded-xl border-2 border-surface-200 
+           text-surface-700 hover:bg-surface-50 hover:border-surface-300 cursor-pointer transition-all 
+           whitespace-nowrap shadow-sm;
   }
 
   .category-tab.active {
-    @apply bg-primary-600 text-white border-primary-600;
+    @apply bg-primary-600 text-white border-primary-600 shadow-sm;
   }
 
   /* Search */
@@ -367,5 +375,88 @@
 @layer utilities {
   .currency::before {
     content: '₹';
+  }
+}
+
+/* ============================================================ */
+/* Print Styles for Receipts & Invoices */
+/* ============================================================ */
+@media print {
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide entire application shell during printing */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Make only the receipt card and its children visible */
+  #printable-receipt,
+  #printable-receipt * {
+    visibility: visible !important;
+  }
+
+  #printable-receipt {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Thermal 80mm (3 inch roll) */
+  #printable-receipt.print-thermal80 {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 2mm 3mm !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Thermal 58mm (2 inch roll) */
+  #printable-receipt.print-thermal58 {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 58mm !important;
+    max-width: 58mm !important;
+    margin: 0 !important;
+    padding: 1.5mm 2mm !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Standard A4 Sheet */
+  #printable-receipt.print-a4 {
+    position: static !important;
+    width: 100% !important;
+    max-width: 195mm !important;
+    margin: 0 auto !important;
+    padding: 6mm !important;
+    border: 1px solid #0f172a !important;
+    box-shadow: none !important;
+  }
+
+  /* Ensure modal containers do not clip printable receipt */
+  .modal-backdrop,
+  .modal,
+  .modal-body {
+    position: static !important;
+    overflow: visible !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 }

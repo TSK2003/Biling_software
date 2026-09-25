@@ -34,10 +34,7 @@ pub fn login(state: State<'_, AppState>, username: String, password: String) -> 
         ).unwrap_or_else(|_| "4123".to_string());
 
         let url = format!("http://{}:{}/api/auth/login", host_ip.trim(), host_port.trim());
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let client = crate::network::client::get_http_client();
 
         let body = serde_json::json!({
             "username": username.trim(),

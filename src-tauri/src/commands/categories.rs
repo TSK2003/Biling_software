@@ -8,11 +8,7 @@ pub fn get_categories(state: State<'_, AppState>, active_only: Option<bool>) -> 
     
     // If in Client mode, fetch categories from Host PC
     if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .map_err(|e| e.to_string())?;
-
+        let client = crate::network::client::get_http_client();
         let url = format!("http://{}:{}/api/categories", host_ip, host_port);
         let resp = client.get(&url)
             .send()
@@ -58,6 +54,25 @@ pub fn get_categories(state: State<'_, AppState>, active_only: Option<bool>) -> 
 #[tauri::command]
 pub fn create_category(state: State<'_, AppState>, name: String, sort_order: Option<i32>) -> Result<Category, String> {
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, forward create to Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = crate::network::client::get_http_client();
+        let url = format!("http://{}:{}/api/categories", host_ip, host_port);
+        let payload = crate::network::server::CreateCategoryPayload {
+            name: name.trim().to_string(),
+            sort_order,
+        };
+        let resp = client.post(&url)
+            .json(&payload)
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+        if !resp.status().is_success() {
+            let err = resp.text().unwrap_or_else(|_| "Host error creating category".to_string());
+            return Err(err);
+        }
+        return resp.json::<Category>().map_err(|e| format!("Invalid response from Host: {}", e));
+    }
     
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -111,6 +126,26 @@ pub fn update_category(
     is_active: Option<bool>,
 ) -> Result<Category, String> {
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, forward update to Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = crate::network::client::get_http_client();
+        let url = format!("http://{}:{}/api/categories/{}", host_ip, host_port, id);
+        let payload = crate::network::server::UpdateCategoryPayload {
+            name,
+            sort_order,
+            is_active,
+        };
+        let resp = client.put(&url)
+            .json(&payload)
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+        if !resp.status().is_success() {
+            let err = resp.text().unwrap_or_else(|_| "Host error updating category".to_string());
+            return Err(err);
+        }
+        return resp.json::<Category>().map_err(|e| format!("Invalid response from Host: {}", e));
+    }
     
     if let Some(ref n) = name {
         let n = n.trim();
@@ -169,6 +204,20 @@ pub fn update_category(
 #[tauri::command]
 pub fn delete_category(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, forward delete to Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = crate::network::client::get_http_client();
+        let url = format!("http://{}:{}/api/categories/{}", host_ip, host_port, id);
+        let resp = client.delete(&url)
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+        if !resp.status().is_success() {
+            let err = resp.text().unwrap_or_else(|_| "Host error deleting category".to_string());
+            return Err(err);
+        }
+        return Ok(());
+    }
     
     // Delete any products assigned to this category
     let _ = db.conn.execute("DELETE FROM products WHERE category_id = ?1", rusqlite::params![id]);

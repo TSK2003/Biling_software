@@ -17,15 +17,15 @@ import {
   FileText,
   HardDrive,
   Users,
-  Settings,
   CheckSquare,
   Square,
-  Sparkles,
+  ShieldCheck,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
 import { Modal } from '../../components/Modal';
 import { ConfirmModal } from '../../components/ConfirmModal';
 import { Header } from '../../components/Header';
+import { useAuth } from '../../contexts/AuthContext';
 import type { User, ScreenPermission } from '../../types';
 import toast from 'react-hot-toast';
 
@@ -94,16 +94,10 @@ const ALL_SCREENS: ScreenDefinition[] = [
     description: 'Manage staff cashier accounts, passwords, and module permissions',
     icon: Users,
   },
-  {
-    id: 'settings',
-    label: 'Store Settings',
-    category: 'Reports & Tools',
-    description: 'Configure store profile, GST taxes, multi-computer LAN, and printer size',
-    icon: Settings,
-  },
 ];
 
 export const UsersPage: React.FC = () => {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -119,7 +113,14 @@ export const UsersPage: React.FC = () => {
   const [formPassword, setFormPassword] = useState('');
   const [showFormPassword, setShowFormPassword] = useState(false);
   const [formRoleName, setFormRoleName] = useState('Cashier');
-  const [formPermissions, setFormPermissions] = useState<ScreenPermission[]>(['billing', 'bills']);
+  const [formPermissions, setFormPermissions] = useState<ScreenPermission[]>([
+    'billing',
+    'bills',
+    'dashboard',
+    'products',
+    'categories',
+    'reports',
+  ]);
   const [formMaxDiscount, setFormMaxDiscount] = useState('10');
   const [isSaving, setIsSaving] = useState(false);
 
@@ -180,8 +181,7 @@ export const UsersPage: React.FC = () => {
     setFormDisplayName('');
     setFormPassword('');
     setShowFormPassword(false);
-    setFormRoleName('Cashier');
-    setFormPermissions(['billing', 'bills']);
+    setFormPermissions(['billing', 'bills', 'dashboard', 'products', 'categories', 'reports']);
     setFormMaxDiscount('10');
     setIsModalOpen(true);
   };
@@ -194,10 +194,11 @@ export const UsersPage: React.FC = () => {
     setShowFormPassword(false);
     setFormRoleName(u.role || 'Staff');
     setFormPermissions(
-      (u.permissions as ScreenPermission[]) ||
-        (u.role.toLowerCase() === 'admin'
-          ? ALL_SCREENS.map((s) => s.id)
-          : ['billing', 'bills'])
+      u.permissions && u.permissions.length > 0
+        ? (u.permissions as ScreenPermission[])
+        : u.role.toLowerCase() === 'admin'
+        ? ALL_SCREENS.map((s) => s.id)
+        : ['billing', 'bills', 'dashboard', 'products', 'categories', 'reports']
     );
     setFormMaxDiscount(String(u.max_discount_pct));
     setIsModalOpen(true);
@@ -217,6 +218,23 @@ export const UsersPage: React.FC = () => {
 
     const finalRole = formRoleName.trim() || 'Staff';
 
+    // Password validation: min 6, max 10 characters
+    if (editingUser) {
+      if (formPassword.trim() && (formPassword.trim().length < 6 || formPassword.trim().length > 10)) {
+        toast.error('Password must be between 6 and 10 characters');
+        return;
+      }
+    } else {
+      if (!formUsername.trim()) {
+        toast.error('Username is required');
+        return;
+      }
+      if (!formPassword || formPassword.length < 6 || formPassword.length > 10) {
+        toast.error('Password must be between 6 and 10 characters');
+        return;
+      }
+    }
+
     setIsSaving(true);
     try {
       if (editingUser) {
@@ -231,10 +249,6 @@ export const UsersPage: React.FC = () => {
         );
         toast.success('User updated successfully');
       } else {
-        if (!formUsername.trim() || !formPassword) {
-          toast.error('Username and password are required');
-          return;
-        }
         await api.createUser(
           formUsername.trim(),
           formDisplayName.trim(),
@@ -266,6 +280,11 @@ export const UsersPage: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (!deletingUser) return;
+    if (currentUser?.id === deletingUser.id) {
+      toast.error('You cannot delete your own currently logged-in account');
+      setDeletingUser(null);
+      return;
+    }
     setIsDeleting(true);
     try {
       await api.deleteUser(deletingUser.id);
@@ -467,8 +486,9 @@ export const UsersPage: React.FC = () => {
                           <div className="flex items-center justify-end gap-1.5">
                             {/* Edit Button */}
                             <button
+                              type="button"
                               onClick={() => handleOpenEdit(u)}
-                              className="h-7 px-2.5 text-2xs font-semibold bg-white hover:bg-surface-50 text-primary-700 border border-surface-300 rounded-md transition-colors inline-flex items-center gap-1"
+                              className="h-7 px-2.5 text-2xs font-semibold bg-white hover:bg-surface-50 text-primary-700 border border-surface-300 rounded-md transition-colors inline-flex items-center gap-1 cursor-pointer"
                               title="Edit user details & permissions"
                             >
                               <Edit2 className="w-3 h-3 text-primary-600" />
@@ -479,8 +499,9 @@ export const UsersPage: React.FC = () => {
                               <>
                                 {/* Activate / Deactivate Toggle Button */}
                                 <button
+                                  type="button"
                                   onClick={() => handleToggleActive(u)}
-                                  className={`h-7 px-2.5 text-2xs font-semibold rounded-md border transition-colors inline-flex items-center gap-1 ${
+                                  className={`h-7 px-2.5 text-2xs font-semibold rounded-md border transition-colors inline-flex items-center gap-1 cursor-pointer ${
                                     u.is_active
                                       ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
                                       : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
@@ -493,8 +514,9 @@ export const UsersPage: React.FC = () => {
 
                                 {/* Delete Button */}
                                 <button
+                                  type="button"
                                   onClick={() => setDeletingUser(u)}
-                                  className="h-7 px-2.5 text-2xs font-semibold rounded-md border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors inline-flex items-center gap-1"
+                                  className="h-7 px-2.5 text-2xs font-semibold rounded-md border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors inline-flex items-center gap-1 cursor-pointer"
                                   title="Delete user account"
                                 >
                                   <Trash2 className="w-3 h-3 text-red-600" />
@@ -535,7 +557,7 @@ export const UsersPage: React.FC = () => {
                 type="text"
                 value={formDisplayName}
                 onChange={(e) => setFormDisplayName(e.target.value)}
-                placeholder="e.g. John Smith"
+                placeholder="Full Name"
                 className="form-input text-sm"
                 required
                 autoFocus
@@ -551,7 +573,7 @@ export const UsersPage: React.FC = () => {
                 value={formUsername}
                 onChange={(e) => setFormUsername(e.target.value)}
                 disabled={!!editingUser}
-                placeholder="e.g. john_s"
+                placeholder="Username"
                 className="form-input font-mono text-sm"
                 required
               />
@@ -561,26 +583,45 @@ export const UsersPage: React.FC = () => {
           <div className="grid grid-cols-3 gap-4">
             {/* Password */}
             <div className="form-group col-span-1">
-              <label className="form-label text-xs font-semibold h-5 flex items-center">
-                {editingUser ? 'Password' : 'Password *'}
+              <label className="form-label text-xs font-semibold h-5 flex items-center justify-between">
+                <span>{editingUser ? 'Password' : 'Password *'}</span>
+                <span className={`text-2xs font-mono font-bold ${
+                  formPassword.length >= 6 && formPassword.length <= 10
+                    ? 'text-emerald-600'
+                    : formPassword.length > 0
+                    ? 'text-amber-600'
+                    : 'text-surface-400'
+                }`}>
+                  {formPassword.length}/10
+                </span>
               </label>
               <div className="relative">
                 <input
                   type={showFormPassword ? 'text' : 'password'}
                   value={formPassword}
-                  onChange={(e) => setFormPassword(e.target.value)}
-                  placeholder={editingUser ? 'Leave blank to keep' : '••••••••'}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.length <= 10) setFormPassword(val);
+                  }}
+                  placeholder={editingUser ? 'Leave blank to keep' : '6–10 characters'}
                   className="form-input font-mono text-sm pr-9"
+                  maxLength={10}
+                  minLength={editingUser ? undefined : 6}
                   required={!editingUser}
                 />
                 <button
                   type="button"
+                  tabIndex={-1}
                   onClick={() => setShowFormPassword(!showFormPassword)}
-                  className="absolute right-2.5 top-2.5 text-surface-400 hover:text-surface-700"
+                  className="absolute right-2.5 top-2.5 text-surface-400 hover:text-surface-700 focus:outline-none"
+                  title={showFormPassword ? 'Hide password' : 'Show password'}
                 >
                   {showFormPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <p className="text-2xs text-surface-500 mt-1">
+                {editingUser ? 'Enter 6–10 chars to update' : 'Must be between 6 and 10 characters'}
+              </p>
             </div>
 
             {/* Role / Position Custom Name */}
@@ -592,7 +633,7 @@ export const UsersPage: React.FC = () => {
                 type="text"
                 value={formRoleName}
                 onChange={(e) => setFormRoleName(e.target.value)}
-                placeholder="e.g. Cashier / Manager"
+                placeholder="Role Title"
                 className="form-input text-sm"
                 required
               />
@@ -619,7 +660,7 @@ export const UsersPage: React.FC = () => {
             <div className="flex items-center justify-between mb-3">
               <div>
                 <div className="text-xs font-bold text-surface-900 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-primary-600" />
+                  <ShieldCheck className="w-4 h-4 text-primary-600" />
                   <span>Authorized Screen Checkpoints</span>
                   <span className="font-mono bg-primary-50 text-primary-700 text-2xs px-2 py-0.5 rounded-full font-bold border border-primary-200">
                     {formPermissions.length} of {ALL_SCREENS.length} selected

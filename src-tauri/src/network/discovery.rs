@@ -82,8 +82,21 @@ pub fn discover_hosts_on_lan(timeout_secs: u64) -> Vec<DiscoveredHost> {
     let broadcast_addr = SocketAddr::from(([255, 255, 255, 255], DISCOVERY_PORT));
     let query_msg = format!("{}:{}", DISCOVERY_MAGIC_REQ, "0.1.0");
     
-    // Broadcast discovery probe
+    // Broadcast discovery probe to 255.255.255.255
     let _ = socket.send_to(query_msg.as_bytes(), broadcast_addr);
+
+    // Also broadcast to specific subnet broadcast addresses (e.g. 192.168.x.255)
+    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+        for (_name, ip) in interfaces {
+            if let std::net::IpAddr::V4(ipv4) = ip {
+                let o = ipv4.octets();
+                if !ipv4.is_loopback() && !(o[0] == 169 && o[1] == 254) && o[0] != 0 && o[0] != 255 {
+                    let subnet_bcast = SocketAddr::from(([o[0], o[1], o[2], 255], DISCOVERY_PORT));
+                    let _ = socket.send_to(query_msg.as_bytes(), subnet_bcast);
+                }
+            }
+        }
+    }
     
     let mut buf = [0u8; 2048];
     let start = std::time::Instant::now();

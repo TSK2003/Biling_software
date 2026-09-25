@@ -12,7 +12,11 @@
     "start": "node tools/run-dev.js",
     "make-key": "cargo run --manifest-path src-tauri/Cargo.toml --bin make_usb_key --",
     "build:exe": "tauri build --no-bundle",
-    "build:installer": "tauri build"
+    "build:installer": "node tools/build-installer.js",
+    "build:installer:clean": "node tools/build-installer.js",
+    "build:installer:demo": "node tools/build-demo-installer.js",
+    "seed:demo": "python tools/seed-demo-db.py",
+    "clear:demo": "python tools/clear-demo-db.py"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

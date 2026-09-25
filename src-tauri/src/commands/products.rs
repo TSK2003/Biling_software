@@ -14,11 +14,7 @@ pub fn get_products(
     
     // If in Client mode, fetch products from Host PC
     if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .map_err(|e| e.to_string())?;
-
+        let client = crate::network::client::get_http_client();
         let url = format!("http://{}:{}/api/products", host_ip, host_port);
         let resp = client.get(&url)
             .send()
@@ -169,6 +165,29 @@ pub fn create_product(
     image_path: Option<String>,
 ) -> Result<Product, String> {
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, forward create to Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = crate::network::client::get_http_client();
+        let url = format!("http://{}:{}/api/products", host_ip, host_port);
+        let payload = crate::network::server::CreateProductPayload {
+            name: name.trim().to_string(),
+            category_id,
+            selling_price_paise,
+            gst_enabled,
+            gst_percentage_x100,
+            image_path,
+        };
+        let resp = client.post(&url)
+            .json(&payload)
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+        if !resp.status().is_success() {
+            let err = resp.text().unwrap_or_else(|_| "Host error creating product".to_string());
+            return Err(err);
+        }
+        return resp.json::<Product>().map_err(|e| format!("Invalid response from Host: {}", e));
+    }
     
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -214,6 +233,30 @@ pub fn update_product(
     image_path: Option<String>,
 ) -> Result<Product, String> {
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, forward update to Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = crate::network::client::get_http_client();
+        let url = format!("http://{}:{}/api/products/{}", host_ip, host_port, id);
+        let payload = crate::network::server::UpdateProductPayload {
+            name,
+            category_id,
+            selling_price_paise,
+            gst_enabled,
+            gst_percentage_x100,
+            is_active,
+            image_path,
+        };
+        let resp = client.put(&url)
+            .json(&payload)
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+        if !resp.status().is_success() {
+            let err = resp.text().unwrap_or_else(|_| "Host error updating product".to_string());
+            return Err(err);
+        }
+        return resp.json::<Product>().map_err(|e| format!("Invalid response from Host: {}", e));
+    }
     
     if let Some(ref n) = name {
         let n = n.trim();
@@ -277,6 +320,20 @@ pub fn update_product(
 #[tauri::command]
 pub fn delete_product(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, forward delete to Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = crate::network::client::get_http_client();
+        let url = format!("http://{}:{}/api/products/{}", host_ip, host_port, id);
+        let resp = client.delete(&url)
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+        if !resp.status().is_success() {
+            let err = resp.text().unwrap_or_else(|_| "Host error deleting product".to_string());
+            return Err(err);
+        }
+        return Ok(());
+    }
     
     // Unlink any bill item references so foreign keys don't restrict deletion
     let _ = db.conn.execute(
@@ -397,7 +454,7 @@ pub fn upload_product_image(
 
 // Helper functions
 
-fn generate_product_code(conn: &rusqlite::Connection) -> Result<String, String> {
+pub fn generate_product_code(conn: &rusqlite::Connection) -> Result<String, String> {
     // Atomically increment the sequence
     conn.execute(
         "UPDATE product_code_seq SET last_code = last_code + 1 WHERE id = 1",
@@ -413,7 +470,7 @@ fn generate_product_code(conn: &rusqlite::Connection) -> Result<String, String> 
     Ok(format!("PRD-{:06}", last_code))
 }
 
-fn get_product_by_id(conn: &rusqlite::Connection, id: i64) -> Result<Product, String> {
+pub fn get_product_by_id(conn: &rusqlite::Connection, id: i64) -> Result<Product, String> {
     conn.query_row(
         "SELECT p.id, p.product_code, p.name, p.category_id, c.name as category_name,
                 p.image_path, p.selling_price_paise, p.gst_enabled, p.gst_percentage_x100,
@@ -426,7 +483,7 @@ fn get_product_by_id(conn: &rusqlite::Connection, id: i64) -> Result<Product, St
     ).map_err(|_| "Product not found".to_string())
 }
 
-fn map_product_row(row: &rusqlite::Row) -> rusqlite::Result<Product> {
+pub fn map_product_row(row: &rusqlite::Row) -> rusqlite::Result<Product> {
     Ok(Product {
         id: row.get(0)?,
         product_code: row.get(1)?,

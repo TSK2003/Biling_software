@@ -21,7 +21,7 @@ pub fn get_dashboard_stats(
             COALESCE(SUM(p.card_amount_paise), 0) as card_sales
          FROM bills b
          LEFT JOIN payments p ON b.id = p.bill_id
-         WHERE b.status = 'completed'
+         WHERE b.status IN ('completed', 'returned')
            AND b.business_date >= ?1 AND b.business_date <= ?2",
         rusqlite::params![date_from, date_to],
         |row| {
@@ -46,7 +46,7 @@ pub fn get_dashboard_stats(
         "SELECT COALESCE(SUM(bi.quantity), 0)
          FROM bill_items bi
          JOIN bills b ON bi.bill_id = b.id
-         WHERE b.status = 'completed'
+         WHERE b.status IN ('completed', 'returned')
            AND b.business_date >= ?1 AND b.business_date <= ?2",
         rusqlite::params![date_from, date_to],
         |row| row.get(0),
@@ -116,7 +116,7 @@ pub fn get_sales_trend(
                 COALESCE(SUM(grand_total_paise), 0) as total_sales,
                 COUNT(id) as bill_count
          FROM bills
-         WHERE status = 'completed'
+         WHERE status IN ('completed', 'returned')
            AND business_date >= ?1 AND business_date <= ?2
          GROUP BY business_date
          ORDER BY business_date ASC"

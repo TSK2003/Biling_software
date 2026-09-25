@@ -296,7 +296,7 @@ impl ReportService {
              FROM bills b
              LEFT JOIN bill_items bi ON b.id = bi.bill_id
              LEFT JOIN payments p ON b.id = p.bill_id
-             WHERE b.business_date >= ?1 AND b.business_date <= ?2 AND b.status = 'completed'"
+             WHERE b.business_date >= ?1 AND b.business_date <= ?2 AND b.status IN ('completed', 'returned')"
         ).map_err(|e| format!("Summary query error: {}", e))?;
 
         let summary = summary_stmt.query_row(params![date_from, date_to], |r| {
