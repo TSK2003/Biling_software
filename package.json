@@ -16,7 +16,8 @@
     "build:installer:clean": "node tools/build-installer.js",
     "build:installer:demo": "node tools/build-demo-installer.js",
     "seed:demo": "python tools/seed-demo-db.py",
-    "clear:demo": "python tools/clear-demo-db.py"
+    "clear:demo": "python tools/clear-demo-db.py",
+    "clean:data": "node tools/clean-data.js"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
