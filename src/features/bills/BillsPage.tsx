@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Eye, Ban, RotateCcw, CheckCircle2, Printer } from 'lucide-react';
 import { api } from '../../lib/ipc';
 import { formatCurrency, getTodayDateString } from '../../lib/format';
@@ -164,13 +164,48 @@ export const BillsPage: React.FC = () => {
     );
   };
 
-  // Calculate total refund amount
-  const returnRefundTotal = returnItems
-    .filter((item) => item.selected)
-    .reduce((sum, item) => {
-      const unitPrice = item.billItem.unit_price_paise;
-      return sum + unitPrice * item.returnQty;
-    }, 0);
+  // Calculate total refund amount including item GST & factoring in bill discounts
+  const returnRefundTotal = useMemo(() => {
+    if (!returningBill) return 0;
+
+    let rawTotal = 0;
+    let selectedAllUnits = true;
+
+    for (const item of returnItems) {
+      if (item.selected) {
+        const itemBase = item.billItem.unit_price_paise * item.returnQty;
+        const itemGst =
+          item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0
+            ? Math.round((itemBase * item.billItem.gst_percentage_x100) / 10000)
+            : 0;
+        rawTotal += itemBase + itemGst;
+
+        if (item.returnQty < item.billItem.quantity) {
+          selectedAllUnits = false;
+        }
+      } else {
+        selectedAllUnits = false;
+      }
+    }
+
+    if (rawTotal === 0) return 0;
+
+    // If every item in the bill is selected for return at full remaining quantity
+    if (selectedAllUnits && returnItems.length > 0) {
+      return returningBill.grand_total_paise || 0;
+    }
+
+    // For partial returns, adjust for bill discount if any was applied
+    const grossBill = (returningBill.subtotal_paise || 0) + (returningBill.gst_total_paise || 0);
+    let refund = rawTotal;
+    if (grossBill > 0 && (returningBill.discount_amount_paise || 0) > 0) {
+      const ratio = (returningBill.grand_total_paise || 0) / grossBill;
+      refund = Math.round(rawTotal * ratio);
+    }
+
+    // Refund can never exceed bill's grand total
+    return Math.min(refund, returningBill.grand_total_paise || 0);
+  }, [returnItems, returningBill]);
 
   const selectedReturnCount = returnItems.filter((item) => item.selected).length;
 
@@ -178,7 +213,8 @@ export const BillsPage: React.FC = () => {
     returningBill !== null &&
     selectedReturnCount > 0 &&
     (returnRefundTotal >= (returningBill.grand_total_paise || 0) ||
-      returnItems.every((item) => !item.selected || item.returnQty >= item.billItem.quantity));
+      (returnItems.length > 0 &&
+        returnItems.every((item) => item.selected && item.returnQty >= item.billItem.quantity)));
 
   const handleConfirmReturn = async () => {
     if (!user?.id || !returningBill) return;
@@ -203,10 +239,6 @@ export const BillsPage: React.FC = () => {
         unit_price_paise: item.billItem.unit_price_paise,
         line_total_paise: item.billItem.unit_price_paise * item.returnQty,
       }));
-
-    const isAllItemsReturned =
-      returnRefundTotal >= returningBill.grand_total_paise ||
-      returnItems.every((item) => !item.selected || item.returnQty >= item.billItem.quantity);
 
     setIsReturning(true);
     try {
@@ -726,65 +758,88 @@ export const BillsPage: React.FC = () => {
                   <tr>
                     <th className="w-12 text-center">Select</th>
                     <th>Product</th>
-                    <th className="text-right w-28">Unit Price</th>
+                    <th className="text-right w-32">Unit Price</th>
                     <th className="text-center w-24">Original Qty</th>
                     <th className="text-center w-28">Return Qty</th>
-                    <th className="text-right w-28">Refund</th>
+                    <th className="text-right w-36">Line Refund</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {returnItems.map((item, index) => (
-                    <tr
-                      key={item.billItem.id}
-                      className={item.selected ? 'bg-amber-50/50' : ''}
-                    >
-                      <td className="text-center">
-                        <input
-                          type="checkbox"
-                          checked={item.selected}
-                          onChange={() => toggleReturnItem(index)}
-                          className="form-checkbox"
-                        />
-                      </td>
-                      <td className="font-medium text-surface-900">
-                        {item.billItem.product_name_snapshot}
-                        <span className="text-xs text-surface-400 block font-mono">
-                          {item.billItem.product_code_snapshot}
-                        </span>
-                      </td>
-                      <td className="text-right font-mono">
-                        {formatCurrency(item.billItem.unit_price_paise)}
-                      </td>
-                      <td className="text-center font-mono font-bold">
-                        {item.billItem.quantity}
-                      </td>
-                      <td className="text-center">
-                        {item.selected ? (
+                  {returnItems.map((item, index) => {
+                    const itemBase = item.billItem.unit_price_paise * item.returnQty;
+                    const itemGst =
+                      item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0
+                        ? Math.round((itemBase * item.billItem.gst_percentage_x100) / 10000)
+                        : 0;
+                    const lineRefund = itemBase + itemGst;
+
+                    return (
+                      <tr
+                        key={item.billItem.id}
+                        className={item.selected ? 'bg-amber-50/50' : ''}
+                      >
+                        <td className="text-center">
                           <input
-                            type="number"
-                            min="1"
-                            max={item.billItem.quantity}
-                            value={item.returnQty}
-                            onChange={(e) =>
-                              updateReturnQty(index, parseInt(e.target.value) || 1)
-                            }
-                            className="w-16 h-8 text-center text-sm border border-surface-300 rounded bg-white font-mono font-bold mx-auto"
+                            type="checkbox"
+                            checked={item.selected}
+                            onChange={() => toggleReturnItem(index)}
+                            className="form-checkbox"
                           />
-                        ) : (
-                          <span className="text-surface-400">—</span>
-                        )}
-                      </td>
-                      <td className="text-right font-mono font-bold">
-                        {item.selected ? (
-                          <span className="text-red-600">
-                            -{formatCurrency(item.billItem.unit_price_paise * item.returnQty)}
+                        </td>
+                        <td className="font-medium text-surface-900">
+                          {item.billItem.product_name_snapshot}
+                          <span className="text-xs text-surface-400 block font-mono">
+                            {item.billItem.product_code_snapshot}
                           </span>
-                        ) : (
-                          <span className="text-surface-400">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="text-right font-mono">
+                          <div>{formatCurrency(item.billItem.unit_price_paise)}</div>
+                          {item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0 ? (
+                            <span className="inline-block text-2xs text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                              +{(item.billItem.gst_percentage_x100 / 100).toFixed(0)}% GST
+                            </span>
+                          ) : (
+                            <span className="text-2xs text-surface-400 block font-sans">No GST</span>
+                          )}
+                        </td>
+                        <td className="text-center font-mono font-bold">
+                          {item.billItem.quantity}
+                        </td>
+                        <td className="text-center">
+                          {item.selected ? (
+                            <input
+                              type="number"
+                              min="1"
+                              max={item.billItem.quantity}
+                              value={item.returnQty}
+                              onChange={(e) =>
+                                updateReturnQty(index, parseInt(e.target.value) || 1)
+                              }
+                              className="w-16 h-8 text-center text-sm border border-surface-300 rounded bg-white font-mono font-bold mx-auto"
+                            />
+                          ) : (
+                            <span className="text-surface-400">—</span>
+                          )}
+                        </td>
+                        <td className="text-right font-mono font-bold">
+                          {item.selected ? (
+                            <div>
+                              <span className="text-red-600">
+                                -{formatCurrency(lineRefund)}
+                              </span>
+                              {itemGst > 0 && (
+                                <span className="text-2xs text-surface-400 block font-normal">
+                                  incl. {formatCurrency(itemGst)} GST
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-surface-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -846,7 +901,7 @@ export const BillsPage: React.FC = () => {
                     </span>
                   ) : (
                     <span className="badge badge-warning font-bold">
-                      RETURNED (Partial Return — ₹{formatCurrency((returningBill?.grand_total_paise || 0) - returnRefundTotal)} remaining)
+                      RETURNED (Partial Return — {formatCurrency((returningBill?.grand_total_paise || 0) - returnRefundTotal)} remaining)
                     </span>
                   )}
                 </div>

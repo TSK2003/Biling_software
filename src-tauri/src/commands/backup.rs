@@ -49,6 +49,13 @@ pub fn clear_all_business_data(state: State<'_, AppState>) -> Result<(), String>
     let _ = db.conn.execute("INSERT OR IGNORE INTO categories (id, name, sort_order, is_active) VALUES (4, 'Ice Cream', 4, 1)", []);
     let _ = db.conn.execute("INSERT OR IGNORE INTO categories (id, name, sort_order, is_active) VALUES (5, 'Others', 5, 1)", []);
     
+    // Also wipe activation file and license records so application requires re-activation
+    let activation_file = db.activation_dir().join("activation.dat");
+    if activation_file.exists() {
+        let _ = std::fs::remove_file(&activation_file);
+    }
+    let _ = db.conn.execute("DELETE FROM license_activations", []);
+
     let _ = db.conn.execute(
         "INSERT INTO audit_logs (action, entity_type) VALUES ('wipe_all_data', 'database')",
         [],

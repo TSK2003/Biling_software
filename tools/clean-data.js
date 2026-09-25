@@ -1,10 +1,20 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 
 console.log('========================================================');
-console.log('CLEANING LOCAL BILLING SOFTWARE APPDATA');
+console.log('CLEANING LOCAL BILLING SOFTWARE APPDATA & LICENSES');
 console.log('========================================================\n');
+
+// 1. Terminate running processes to unlock SQLite & WebView2 files
+try {
+  console.log('[CLOSING] Terminating any running billing app or webview processes...');
+  execSync('taskkill /F /IM "billing-software.exe" /IM "Billing Software.exe" /IM "msedgewebview2.exe"', { stdio: 'ignore' });
+  console.log('[OK] Processes terminated.');
+} catch (e) {
+  // Ignored if not running
+}
 
 const localAppData = process.env.LOCALAPPDATA;
 const appData = process.env.APPDATA;
@@ -20,26 +30,16 @@ const targets = [
 targets.forEach((targetDir) => {
   if (fs.existsSync(targetDir)) {
     try {
-      // First try deleting items individually to avoid locked handle cascade
-      const items = fs.readdirSync(targetDir);
-      for (const item of items) {
-        const itemPath = path.join(targetDir, item);
-        try {
-          fs.rmSync(itemPath, { recursive: true, force: true });
-          console.log(`[DELETED] ${item}`);
-        } catch (itemErr) {
-          console.warn(`[LOCKED] ${item}: ${itemErr.message}`);
-        }
-      }
-      fs.rmdirSync(targetDir);
-      console.log(`[REMOVED ROOT] ${targetDir}`);
+      fs.rmSync(targetDir, { recursive: true, force: true });
+      console.log(`[DELETED] ${targetDir}`);
     } catch (err) {
-      console.warn(`[SKIPPED] ${targetDir}: ${err.message}`);
+      console.warn(`[ERROR] Could not delete ${targetDir}: ${err.message}`);
     }
   } else {
-    console.log(`[NOT FOUND / ALREADY CLEAN] ${targetDir}`);
+    console.log(`[ALREADY CLEAN] ${targetDir}`);
   }
 });
 
-console.log('\n[SUCCESS] Local data wipe complete! All old databases removed.');
+console.log('\n[SUCCESS] Local data wipe complete! All old databases, bills, and licenses removed.');
+console.log('Next app launch or install will require License Key activation and start completely fresh.');
 console.log('========================================================\n');

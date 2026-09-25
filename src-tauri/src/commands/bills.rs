@@ -210,7 +210,7 @@ pub fn get_bill_detail(state: State<'_, AppState>, bill_id: i64) -> Result<BillD
         "SELECT id, bill_id, product_id, product_code_snapshot, product_name_snapshot,
                 category_name_snapshot, unit_price_paise, quantity, gst_enabled,
                 gst_percentage_x100, gst_amount_paise, line_total_paise
-         FROM bill_items WHERE bill_id = ?1 ORDER BY sort_order"
+         FROM bill_items WHERE bill_id = ?1 AND quantity > 0 ORDER BY sort_order"
     ).map_err(|e| format!("Query error: {}", e))?;
     
     let items: Vec<BillItem> = stmt.query_map(rusqlite::params![bill_id], |row| {

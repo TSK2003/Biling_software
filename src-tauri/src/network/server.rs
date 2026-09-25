@@ -860,44 +860,90 @@ async fn return_bill_endpoint(
             }
 
             if bill_item_id > 0 {
-                let current_item_qty: i64 = tx.query_row(
-                    "SELECT quantity FROM bill_items WHERE id = ?1",
+                let item_data: Option<(i64, i64, i32, i32)> = tx.query_row(
+                    "SELECT quantity, unit_price_paise, gst_enabled, gst_percentage_x100 FROM bill_items WHERE id = ?1",
                     rusqlite::params![bill_item_id],
-                    |r| r.get(0),
-                ).unwrap_or(qty as i64);
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                ).ok();
 
-                let new_item_qty = (current_item_qty - qty as i64).max(0);
-                let new_line_total = new_item_qty * unit_price;
-
-                let _ = tx.execute(
-                    "UPDATE bill_items SET quantity = ?1, line_total_paise = ?2 WHERE id = ?3",
-                    rusqlite::params![new_item_qty, new_line_total, bill_item_id],
-                );
+                if let Some((current_qty, unit_price_db, gst_enabled, gst_percentage_x100)) = item_data {
+                    let price = if unit_price > 0 { unit_price } else { unit_price_db };
+                    let new_item_qty = (current_qty - qty as i64).max(0);
+                    if new_item_qty <= 0 {
+                        let _ = tx.execute(
+                            "DELETE FROM bill_items WHERE id = ?1",
+                            rusqlite::params![bill_item_id],
+                        );
+                    } else {
+                        let new_line_total = new_item_qty * price;
+                        let new_gst_amount = if gst_enabled == 1 && gst_percentage_x100 > 0 {
+                            (new_line_total * gst_percentage_x100 as i64) / 10000
+                        } else {
+                            0
+                        };
+                        let _ = tx.execute(
+                            "UPDATE bill_items SET quantity = ?1, line_total_paise = ?2, gst_amount_paise = ?3 WHERE id = ?4",
+                            rusqlite::params![new_item_qty, new_line_total, new_gst_amount, bill_item_id],
+                        );
+                    }
+                }
             }
         }
     }
 
-    // 2. Fetch current bill financial totals
-    let current_bill_total: i64 = tx.query_row(
-        "SELECT grand_total_paise FROM bills WHERE id = ?1",
-        rusqlite::params![id],
-        |r| r.get(0),
-    ).unwrap_or(0);
-
+    // 2. Fetch remaining items counts and financials from bill_items
     let remaining_items_sum: i64 = tx.query_row(
         "SELECT COALESCE(SUM(quantity), 0) FROM bill_items WHERE bill_id = ?1",
         rusqlite::params![id],
         |r| r.get(0),
     ).unwrap_or(0);
 
-    let new_grand_total = (current_bill_total - refund_amount_paise).max(0);
+    let remaining_subtotal: i64 = tx.query_row(
+        "SELECT COALESCE(SUM(line_total_paise), 0) FROM bill_items WHERE bill_id = ?1",
+        rusqlite::params![id],
+        |r| r.get(0),
+    ).unwrap_or(0);
 
-    // 3. Remove from Income (Sales revenue)
-    if remaining_items_sum == 0 || new_grand_total == 0 {
-        // FULL RETURN: Mark bill as cancelled
+    let remaining_gst: i64 = tx.query_row(
+        "SELECT COALESCE(SUM(gst_amount_paise), 0) FROM bill_items WHERE bill_id = ?1",
+        rusqlite::params![id],
+        |r| r.get(0),
+    ).unwrap_or(0);
+
+    let discount_info: Option<(String, i32, i64)> = tx.query_row(
+        "SELECT discount_type, discount_value_x100, discount_amount_paise FROM bills WHERE id = ?1",
+        rusqlite::params![id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ).ok();
+
+    let remaining_discount = if let Some((dtype, dval_x100, orig_disc)) = discount_info {
+        if dtype == "percentage" && dval_x100 > 0 {
+            (remaining_subtotal * dval_x100 as i64) / 10000
+        } else if dtype == "fixed" {
+            orig_disc.min(remaining_subtotal + remaining_gst)
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
+    let remaining_grand_total = (remaining_subtotal + remaining_gst - remaining_discount).max(0);
+
+    // 3. Update Bill status and financial totals
+    if remaining_items_sum == 0 || remaining_grand_total == 0 {
+        // FULL RETURN: Mark bill as cancelled and zero out all financial columns
         let cancel_note = format!("Full Return / Cancelled: {}", reason);
         tx.execute(
-            "UPDATE bills SET status = 'cancelled', void_reason = ?1, grand_total_paise = 0, subtotal_paise = 0, updated_at = datetime('now') WHERE id = ?2",
+            "UPDATE bills SET 
+                status = 'cancelled', 
+                void_reason = ?1, 
+                subtotal_paise = 0, 
+                gst_total_paise = 0, 
+                discount_amount_paise = 0, 
+                grand_total_paise = 0, 
+                updated_at = datetime('now') 
+             WHERE id = ?2",
             rusqlite::params![cancel_note, id],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update bill status: {}", e)))?;
 
@@ -906,11 +952,26 @@ async fn return_bill_endpoint(
             rusqlite::params![id],
         );
     } else {
-        // PARTIAL RETURN: Mark bill status as 'returned' with remaining net sales balance
+        // PARTIAL RETURN: Mark bill status as 'returned' with remaining net sales balance and GST
         let note = format!("Partial Return: {} (Refunded: ₹{:.2})", reason, refund_amount_paise as f64 / 100.0);
         tx.execute(
-            "UPDATE bills SET status = 'returned', grand_total_paise = ?1, subtotal_paise = ?1, void_reason = ?2, updated_at = datetime('now') WHERE id = ?3",
-            rusqlite::params![new_grand_total, note, id],
+            "UPDATE bills SET 
+                status = 'returned', 
+                subtotal_paise = ?1, 
+                gst_total_paise = ?2, 
+                discount_amount_paise = ?3, 
+                grand_total_paise = ?4, 
+                void_reason = ?5, 
+                updated_at = datetime('now') 
+             WHERE id = ?6",
+            rusqlite::params![
+                remaining_subtotal,
+                remaining_gst,
+                remaining_discount,
+                remaining_grand_total,
+                note,
+                id
+            ],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update bill totals: {}", e)))?;
 
         let _ = tx.execute(
@@ -920,7 +981,7 @@ async fn return_bill_endpoint(
                 upi_amount_paise = CASE WHEN total_amount_paise > 0 THEN (upi_amount_paise * ?1) / total_amount_paise ELSE 0 END,
                 card_amount_paise = CASE WHEN total_amount_paise > 0 THEN (card_amount_paise * ?1) / total_amount_paise ELSE 0 END
              WHERE bill_id = ?2",
-            rusqlite::params![new_grand_total, id],
+            rusqlite::params![remaining_grand_total, id],
         );
     }
 
@@ -928,7 +989,7 @@ async fn return_bill_endpoint(
         "bill_id": id,
         "reason": reason,
         "refund_amount_paise": refund_amount_paise,
-        "new_grand_total_paise": new_grand_total,
+        "new_grand_total_paise": remaining_grand_total,
     }).to_string();
 
     let _ = tx.execute(

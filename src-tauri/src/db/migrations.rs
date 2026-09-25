@@ -41,6 +41,9 @@ pub fn run_migrations(db: &mut Database) -> Result<(), Box<dyn std::error::Error
     if current_version < 6 {
         apply_v6(db)?;
     }
+    if current_version < 7 {
+        apply_v7(db)?;
+    }
     
     Ok(())
 }
@@ -730,6 +733,31 @@ fn apply_v6(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
     ")?;
     
     log::info!("Database migration v6 (Removed restrictive CHECK constraint on bills.status) applied successfully");
+    Ok(())
+}
+
+/// Version 7: Correct financial totals for cancelled bills (zero out GST, subtotal, discount, grand total)
+fn apply_v7(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
+    let tx = db.conn.transaction()?;
+    tx.execute_batch("
+        UPDATE bills SET 
+            subtotal_paise = 0, 
+            gst_total_paise = 0, 
+            discount_amount_paise = 0, 
+            grand_total_paise = 0 
+        WHERE status = 'cancelled';
+
+        UPDATE payments SET
+            total_amount_paise = 0,
+            cash_amount_paise = 0,
+            upi_amount_paise = 0,
+            card_amount_paise = 0
+        WHERE bill_id IN (SELECT id FROM bills WHERE status = 'cancelled');
+
+        INSERT INTO schema_version (version) VALUES (7);
+    ")?;
+    tx.commit()?;
+    log::info!("Database migration v7 (Zero out cancelled bills GST and financial totals) applied successfully");
     Ok(())
 }
 
