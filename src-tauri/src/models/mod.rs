@@ -150,8 +150,11 @@ pub struct BillingProduct {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CartItem {
     pub product_id: i64,
+    #[serde(alias = "productCode", alias = "code", default)]
     pub product_code: String,
+    #[serde(alias = "productName", alias = "name", default)]
     pub product_name: String,
+    #[serde(alias = "categoryName", alias = "category", default)]
     pub category_name: String,
     #[serde(default)]
     pub image_path: Option<String>,
@@ -235,8 +238,11 @@ pub struct BillItem {
     pub id: i64,
     pub bill_id: i64,
     pub product_id: Option<i64>,
+    #[serde(alias = "product_code", alias = "productCode", alias = "code", default)]
     pub product_code_snapshot: String,
+    #[serde(alias = "product_name", alias = "productName", alias = "name", default)]
     pub product_name_snapshot: String,
+    #[serde(alias = "category_name", alias = "categoryName", alias = "category", default)]
     pub category_name_snapshot: String,
     pub unit_price_paise: i64,
     pub quantity: i32,
@@ -244,6 +250,25 @@ pub struct BillItem {
     pub gst_percentage_x100: i32,
     pub gst_amount_paise: i64,
     pub line_total_paise: i64,
+    #[serde(default)]
+    pub returned_quantity: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReturnedBillItemRecord {
+    pub id: i64,
+    pub bill_id: i64,
+    pub bill_item_id: i64,
+    pub product_id: Option<i64>,
+    pub product_name: String,
+    pub product_code: String,
+    pub quantity: i32,
+    pub unit_price_paise: i64,
+    pub line_total_paise: i64,
+    pub reason: String,
+    pub returned_at: String,
+    #[serde(default)]
+    pub returned_by_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,6 +276,8 @@ pub struct BillDetail {
     pub bill: Bill,
     pub items: Vec<BillItem>,
     pub payment: Payment,
+    #[serde(default)]
+    pub returned_items: Vec<ReturnedBillItemRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

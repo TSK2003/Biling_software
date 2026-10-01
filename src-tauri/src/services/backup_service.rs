@@ -5,7 +5,7 @@ use rusqlite::params;
 use sha2::{Sha256, Digest};
 use zip::{ZipWriter, ZipArchive, write::FileOptions};
 use walkdir::WalkDir;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use rust_xlsxwriter::{Format, FormatAlign, FormatBorder, Color, Workbook};
 
 use crate::db::connection::Database;
@@ -26,6 +26,36 @@ impl BackupService {
             }
         }
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    }
+
+    /// Get the dedicated Billing Software backups directory inside Downloads
+    pub fn get_billing_downloads_backups_dir() -> PathBuf {
+        let dl = Self::get_downloads_dir();
+        let billing_dir = dl.join("Billing_Software_Backups");
+        let _ = fs::create_dir_all(&billing_dir);
+        billing_dir
+    }
+
+    /// Get user-configured backup folder or fallback to Downloads/Billing_Software_Backups
+    pub fn get_backup_dir(db: &Database) -> PathBuf {
+        Self::get_backup_dir_from_conn(&db.conn)
+    }
+
+    /// Get user-configured backup folder from sqlite connection or fallback to Downloads/Billing_Software_Backups
+    pub fn get_backup_dir_from_conn(conn: &rusqlite::Connection) -> PathBuf {
+        if let Ok(custom_path) = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'backup_folder_path'",
+            [],
+            |r| r.get::<_, String>(0),
+        ) {
+            let p = PathBuf::from(custom_path.trim());
+            if !p.as_os_str().is_empty() {
+                if fs::create_dir_all(&p).is_ok() && p.is_dir() {
+                    return p;
+                }
+            }
+        }
+        Self::get_billing_downloads_backups_dir()
     }
 
     /// Get the application executable directory (installed program folder)
@@ -72,19 +102,13 @@ impl BackupService {
     pub fn create_full_backup(db: &Database, backup_type: &str) -> Result<BackupRecord, String> {
         let now = chrono::Local::now();
         let date_str = now.format("%Y-%m-%d").to_string();
+        let month_str = now.format("%Y-%m").to_string(); // e.g. "2026-10"
         let timestamp_str = now.format("%Y%m%d_%H%M%S").to_string();
 
-        let (backup_filename, excel_backup_filename) = if backup_type == "daily_auto" {
-            (
-                format!("Daily_AutoBackup_{}.billingbackup", date_str),
-                format!("Daily_AutoBackup_{}.xlsx", date_str),
-            )
-        } else {
-            (
-                format!("Shop_Billing_Backup_{}.billingbackup", timestamp_str),
-                format!("Shop_Billing_Data_Backup_{}.xlsx", timestamp_str),
-            )
-        };
+        let (backup_filename, excel_backup_filename) = (
+            format!("Billing_Backup_{}.billingbackup", month_str),
+            format!("Billing_Backup_{}.xlsx", month_str),
+        );
         
         let backups_dir = db.backups_dir();
         fs::create_dir_all(&backups_dir).map_err(|e| format!("Failed to create backups directory: {}", e))?;
@@ -108,8 +132,8 @@ impl BackupService {
             |r| r.get(0),
         ).unwrap_or_else(|_| "SHOP-BILLING-000001".to_string());
 
-        // Generate Master Chartered Accountant & AWS-Grade Excel Backup
-        let _ = Self::generate_master_excel_backup_from_conn(&db.conn, &shop_name, &shop_id, &timestamp_str, &excel_path);
+        // Generate Master Month-Wise Chartered Accountant Excel Backup (Day-by-Day Append & Totals)
+        let _ = Self::generate_monthly_excel_backup_from_conn(&db.conn, &shop_name, &shop_id, &month_str, &excel_path);
 
         let device_independent_id = format!("BIZ-{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
 
@@ -309,17 +333,19 @@ impl BackupService {
             let _ = fs::copy(&excel_path, &app_excel_path);
         }
 
-        // Copy backup package and excel file directly to user's Downloads folder
-        let downloads_dir = Self::get_downloads_dir();
-        let download_backup_path = downloads_dir.join(&backup_filename);
+        // Copy backup package and excel file directly into dedicated backup folder
+        let billing_downloads_dir = Self::get_backup_dir(db);
+        let download_backup_path = billing_downloads_dir.join(&backup_filename);
         let _ = fs::copy(&backup_path, &download_backup_path);
 
-        let download_excel_path = downloads_dir.join(&excel_backup_filename);
+        let download_excel_path = billing_downloads_dir.join(&excel_backup_filename);
         if excel_path.exists() {
             let _ = fs::copy(&excel_path, &download_excel_path);
         }
 
-        let final_path_str = if app_backup_path.exists() {
+        let final_path_str = if download_backup_path.exists() {
+            download_backup_path.to_string_lossy().to_string()
+        } else if app_backup_path.exists() {
             app_backup_path.to_string_lossy().to_string()
         } else {
             backup_path.to_string_lossy().to_string()
@@ -892,8 +918,12 @@ impl BackupService {
             }
         }
 
-        // Also discover any physical .billingbackup files in app_backups_dir and db.backups_dir()
-        let scan_dirs = [Self::get_app_backups_dir(db), db.backups_dir()];
+        // Also discover any physical .billingbackup files in dedicated downloads, app_backups_dir and db.backups_dir()
+        let scan_dirs = [
+            Self::get_backup_dir(db),
+            Self::get_app_backups_dir(db),
+            db.backups_dir(),
+        ];
         let mut synthetic_id = 900000;
         for sdir in scan_dirs {
             if sdir.exists() {
@@ -985,15 +1015,15 @@ impl BackupService {
             |r| r.get(0),
         ).ok().filter(|s: &String| !s.trim().is_empty());
 
-        let app_backups = Self::get_app_backups_dir(db);
-        let folder_path = app_backups.to_string_lossy().to_string();
+        let billing_backups = Self::get_backup_dir(db);
+        let folder_path = billing_backups.to_string_lossy().to_string();
 
-        let total_backups = WalkDir::new(&app_backups)
+        let total_backups = WalkDir::new(&billing_backups)
             .max_depth(1)
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| {
-                e.path().is_file() && e.path().extension().and_then(|ext| ext.to_str()).map(|s| s == "billingbackup").unwrap_or(false)
+                e.path().is_file() && e.path().extension().and_then(|ext| ext.to_str()).map(|s| s == "billingbackup" || s == "xlsx").unwrap_or(false)
             })
             .count();
 
@@ -1023,6 +1053,711 @@ impl BackupService {
             cmd.spawn().map_err(|e| format!("Failed to open folder: {}", e))?;
             Ok(())
         }
+    }
+
+    /// Generate comprehensive, Chartered Accountant-grade Month-Wise Excel Backup Workbook
+    /// containing Executive KPIs, Day-by-Day aggregated sales breakdown, full bills register,
+    /// items sold analysis, and monthly expenses.
+    pub fn generate_monthly_excel_backup_from_conn(
+        conn: &rusqlite::Connection,
+        shop_name: &str,
+        shop_id: &str,
+        month_str: &str, // e.g. "2026-10"
+        dest_path: &Path,
+    ) -> Result<PathBuf, String> {
+        let mut workbook = Workbook::new();
+
+        // Month start & end strings
+        let month_start = format!("{}-01 00:00:00", month_str);
+        let month_end = format!("{}-31 23:59:59", month_str);
+
+        // Friendly month display name
+        let month_display = chrono::NaiveDate::parse_from_str(&format!("{}-01", month_str), "%Y-%m-%d")
+            .map(|d| d.format("%B %Y").to_string())
+            .unwrap_or_else(|_| month_str.to_string());
+
+        // Palette & Colors
+        let c_navy = Color::RGB(0x0F172A);
+        let c_steel = Color::RGB(0x1E293B);
+        let c_white = Color::RGB(0xFFFFFF);
+        let c_gray_bg = Color::RGB(0xF8FAFC);
+        let c_total_bg = Color::RGB(0xEEF2F6);
+        let c_accent_green = Color::RGB(0x047857);
+
+        // Formats
+        let title_fmt = Format::new()
+            .set_bold()
+            .set_font_size(15)
+            .set_font_color(c_navy);
+
+        let subtitle_fmt = Format::new()
+            .set_italic()
+            .set_font_size(9)
+            .set_font_color(Color::RGB(0x64748B));
+
+        let header_fmt = Format::new()
+            .set_bold()
+            .set_font_size(10)
+            .set_font_color(c_white)
+            .set_background_color(c_navy)
+            .set_align(FormatAlign::Center)
+            .set_border(FormatBorder::Thin);
+
+        let card_header_fmt = Format::new()
+            .set_bold()
+            .set_font_size(9)
+            .set_font_color(c_white)
+            .set_background_color(c_steel)
+            .set_border(FormatBorder::Thin);
+
+        let card_label_fmt = Format::new()
+            .set_bold()
+            .set_font_size(9)
+            .set_background_color(c_gray_bg)
+            .set_border(FormatBorder::Thin);
+
+        let card_val_fmt = Format::new()
+            .set_bold()
+            .set_font_size(10)
+            .set_align(FormatAlign::Right)
+            .set_border(FormatBorder::Thin);
+
+        let card_val_accent = Format::new()
+            .set_bold()
+            .set_font_size(10)
+            .set_font_color(c_accent_green)
+            .set_align(FormatAlign::Right)
+            .set_border(FormatBorder::Thin);
+
+        let text_fmt = Format::new()
+            .set_font_size(9)
+            .set_border(FormatBorder::Thin);
+
+        let center_fmt = Format::new()
+            .set_font_size(9)
+            .set_align(FormatAlign::Center)
+            .set_border(FormatBorder::Thin);
+
+        let num_fmt = Format::new()
+            .set_font_size(9)
+            .set_align(FormatAlign::Right)
+            .set_border(FormatBorder::Thin);
+
+        let total_fmt = Format::new()
+            .set_bold()
+            .set_font_size(10)
+            .set_background_color(c_total_bg)
+            .set_align(FormatAlign::Right)
+            .set_border(FormatBorder::Thin);
+
+        let total_label_fmt = Format::new()
+            .set_bold()
+            .set_font_size(10)
+            .set_background_color(c_total_bg)
+            .set_align(FormatAlign::Center)
+            .set_border(FormatBorder::Thin);
+
+        // 1. Fetch all bills for the month
+        struct MonthBill {
+            bill_number: String,
+            sale_date: String,
+            created_at: String,
+            cashier: String,
+            customer_name: String,
+            customer_phone: String,
+            payment_method: String,
+            subtotal_paise: i64,
+            discount_paise: i64,
+            gst_paise: i64,
+            grand_total_paise: i64,
+            status: String,
+            total_items: i64,
+        }
+
+        let mut bills_stmt = conn.prepare(
+            "SELECT 
+                b.id,
+                b.bill_number,
+                DATE(b.created_at) as sale_date,
+                b.created_at,
+                COALESCE(u.display_name, u.username, 'Admin') as cashier,
+                COALESCE(b.customer_name, 'Walk-in Customer') as cust_name,
+                COALESCE(b.customer_phone, '-') as cust_phone,
+                b.payment_method,
+                b.subtotal_paise,
+                b.discount_amount_paise,
+                b.gst_total_paise,
+                b.grand_total_paise,
+                b.status,
+                COALESCE(bi.total_qty, 0) as total_items
+             FROM bills b
+             LEFT JOIN users u ON b.user_id = u.id
+             LEFT JOIN (
+                 SELECT bill_id, SUM(quantity) as total_qty FROM bill_items GROUP BY bill_id
+             ) bi ON b.id = bi.bill_id
+             WHERE b.created_at >= ?1 AND b.created_at <= ?2
+             ORDER BY b.created_at ASC"
+        ).map_err(|e| e.to_string())?;
+
+        let bills: Vec<MonthBill> = bills_stmt.query_map(params![month_start, month_end], |r| {
+            Ok(MonthBill {
+                bill_number: r.get(1)?,
+                sale_date: r.get(2)?,
+                created_at: r.get(3)?,
+                cashier: r.get(4)?,
+                customer_name: r.get(5)?,
+                customer_phone: r.get(6)?,
+                payment_method: r.get(7)?,
+                subtotal_paise: r.get(8)?,
+                discount_paise: r.get(9)?,
+                gst_paise: r.get(10)?,
+                grand_total_paise: r.get(11)?,
+                status: r.get(12)?,
+                total_items: r.get(13)?,
+            })
+        }).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
+
+        // 2. Fetch daily payments breakdown
+        struct DailyPayments {
+            cash_paise: i64,
+            upi_paise: i64,
+            card_paise: i64,
+        }
+        let mut daily_payments_map: HashMap<String, DailyPayments> = HashMap::new();
+
+        if let Ok(mut pay_stmt) = conn.prepare(
+            "SELECT 
+                DATE(p.created_at) as pay_date,
+                COALESCE(SUM(p.cash_amount_paise), 0),
+                COALESCE(SUM(p.upi_amount_paise), 0),
+                COALESCE(SUM(p.card_amount_paise), 0)
+             FROM payments p
+             JOIN bills b ON p.bill_id = b.id
+             WHERE p.created_at >= ?1 AND p.created_at <= ?2 AND b.status != 'void'
+             GROUP BY DATE(p.created_at)"
+        ) {
+            if let Ok(pay_iter) = pay_stmt.query_map(params![month_start, month_end], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    DailyPayments {
+                        cash_paise: r.get(1)?,
+                        upi_paise: r.get(2)?,
+                        card_paise: r.get(3)?,
+                    }
+                ))
+            }) {
+                for (date_key, pmt) in pay_iter.flatten() {
+                    daily_payments_map.insert(date_key, pmt);
+                }
+            }
+        }
+
+        // 3. Fetch daily expenses breakdown
+        let mut daily_expenses_map: HashMap<String, i64> = HashMap::new();
+        let exp_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='expenses')",
+            [],
+            |r| r.get(0),
+        ).unwrap_or(false);
+
+        if exp_exists {
+            if let Ok(mut exp_stmt) = conn.prepare(
+                "SELECT DATE(expense_date), COALESCE(SUM(amount_paise), 0)
+                 FROM expenses
+                 WHERE expense_date >= ?1 AND expense_date <= ?2 AND status = 'active'
+                 GROUP BY DATE(expense_date)"
+            ) {
+                if let Ok(exp_iter) = exp_stmt.query_map(params![month_start, month_end], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+                }) {
+                    for (date_key, amt) in exp_iter.flatten() {
+                        daily_expenses_map.insert(date_key, amt);
+                    }
+                }
+            }
+        }
+
+        // 4. Group into Daily Aggregations (ordered chronologically)
+        #[derive(Default)]
+        struct DailyStat {
+            total_bills: i64,
+            total_items: i64,
+            gross_paise: i64,
+            discount_paise: i64,
+            gst_paise: i64,
+            net_paise: i64,
+            cash_paise: i64,
+            upi_paise: i64,
+            card_paise: i64,
+            split_paise: i64,
+            expenses_paise: i64,
+            void_bills: i64,
+        }
+
+        let mut daily_map: BTreeMap<String, DailyStat> = BTreeMap::new();
+
+        for b in &bills {
+            let stat = daily_map.entry(b.sale_date.clone()).or_default();
+            if b.status == "void" {
+                stat.void_bills += 1;
+            } else {
+                stat.total_bills += 1;
+                stat.total_items += b.total_items;
+                stat.gross_paise += b.subtotal_paise;
+                stat.discount_paise += b.discount_paise;
+                stat.gst_paise += b.gst_paise;
+                stat.net_paise += b.grand_total_paise;
+
+                match b.payment_method.to_lowercase().as_str() {
+                    "cash" => stat.cash_paise += b.grand_total_paise,
+                    "upi" => stat.upi_paise += b.grand_total_paise,
+                    "card" => stat.card_paise += b.grand_total_paise,
+                    "split" => stat.split_paise += b.grand_total_paise,
+                    _ => stat.cash_paise += b.grand_total_paise,
+                }
+            }
+        }
+
+        // If daily_payments_map has split details, refine cash/upi/card sums
+        for (date_key, stat) in daily_map.iter_mut() {
+            if let Some(pmts) = daily_payments_map.get(date_key) {
+                if pmts.cash_paise > 0 || pmts.upi_paise > 0 || pmts.card_paise > 0 {
+                    stat.cash_paise = pmts.cash_paise;
+                    stat.upi_paise = pmts.upi_paise;
+                    stat.card_paise = pmts.card_paise;
+                }
+            }
+            if let Some(exp) = daily_expenses_map.get(date_key) {
+                stat.expenses_paise = *exp;
+            }
+        }
+
+        // Also add any dates that had expenses even if no bills
+        for (exp_date, exp_amt) in &daily_expenses_map {
+            let stat = daily_map.entry(exp_date.clone()).or_default();
+            stat.expenses_paise = *exp_amt;
+        }
+
+        // Ensure today's date is included in daily_map if we are within this month
+        let today_date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+        if today_date_str.starts_with(month_str) {
+            daily_map.entry(today_date_str).or_default();
+        }
+
+        // 5. Calculate Month-Wise Grand Totals
+        let mut tot_bills = 0i64;
+        let mut tot_items = 0i64;
+        let mut tot_gross = 0i64;
+        let mut tot_discount = 0i64;
+        let mut tot_gst = 0i64;
+        let mut tot_net = 0i64;
+        let mut tot_cash = 0i64;
+        let mut tot_upi = 0i64;
+        let mut tot_card = 0i64;
+        let mut tot_exp = 0i64;
+        let mut tot_void = 0i64;
+
+        for stat in daily_map.values() {
+            tot_bills += stat.total_bills;
+            tot_items += stat.total_items;
+            tot_gross += stat.gross_paise;
+            tot_discount += stat.discount_paise;
+            tot_gst += stat.gst_paise;
+            tot_net += stat.net_paise;
+            tot_cash += stat.cash_paise;
+            tot_upi += stat.upi_paise;
+            tot_card += stat.card_paise;
+            tot_exp += stat.expenses_paise;
+            tot_void += stat.void_bills;
+        }
+        let tot_net_cashflow = tot_net - tot_exp;
+
+        // ==========================================
+        // SHEET 1: DAY-BY-DAY CONSOLIDATED SALES
+        // ==========================================
+        let ws_days = workbook.add_worksheet();
+        ws_days.set_name("Day-by-Day Sales").map_err(|e| e.to_string())?;
+
+        let now = chrono::Local::now();
+        ws_days.write_with_format(0, 0, format!("{} — {} MONTHLY BILLING REPORT", shop_name.to_uppercase(), month_display.to_uppercase()).as_str(), &title_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(1, 0, format!("Single Monthly Consolidated Audit Ledger | Month: {} | Live Snapshot Reconciled on {}", month_display, now.format("%d-%m-%Y %H:%M:%S")).as_str(), &subtitle_fmt).map_err(|e| e.to_string())?;
+
+        // Write Executive KPI Summary Table (rows 3 to 15)
+        ws_days.write_with_format(3, 0, "MONTHLY REVENUE & AUDIT SUMMARY", &card_header_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(3, 1, "TOTAL CONSOLIDATED VALUE", &card_header_fmt).map_err(|e| e.to_string())?;
+
+        let kpis = [
+            ("Reporting Billing Period", month_display.clone(), false),
+            ("Shop ID & License", format!("{} ({})", shop_name, shop_id), false),
+            ("Total Completed Invoices", format!("{} Bills", tot_bills), false),
+            ("Total Units / Products Sold", format!("{} Items", tot_items), false),
+            ("Gross Sales Turnover (Pre-Discount)", format!("₹{:.2}", tot_gross as f64 / 100.0), false),
+            ("Total Trade Discounts Conferred", format!("₹{:.2}", tot_discount as f64 / 100.0), false),
+            ("Total GST / Taxes Collected", format!("₹{:.2}", tot_gst as f64 / 100.0), false),
+            ("Net Business Revenue Realized", format!("₹{:.2}", tot_net as f64 / 100.0), true),
+            ("Cash Drawer Collections", format!("₹{:.2}", tot_cash as f64 / 100.0), false),
+            ("UPI / QR Digital Collections", format!("₹{:.2}", tot_upi as f64 / 100.0), false),
+            ("Card Terminal Collections", format!("₹{:.2}", tot_card as f64 / 100.0), false),
+            ("Total Monthly Business Expenses", format!("₹{:.2}", tot_exp as f64 / 100.0), false),
+            ("Net Operating Cashflow (Revenue - Expenses)", format!("₹{:.2}", tot_net_cashflow as f64 / 100.0), true),
+            ("Cancelled / Void Bills Count", format!("{} Bills", tot_void), false),
+        ];
+
+        for (idx, (k, v, is_acc)) in kpis.iter().enumerate() {
+            let row = 4 + idx as u32;
+            ws_days.write_with_format(row, 0, *k, &card_label_fmt).map_err(|e| e.to_string())?;
+            let fmt = if *is_acc { &card_val_accent } else { &card_val_fmt };
+            ws_days.write_with_format(row, 1, v.as_str(), fmt).map_err(|e| e.to_string())?;
+        }
+
+        // Day-by-Day Table Header
+        let table_start_row = 19;
+        let day_headers = [
+            "Date", "Day", "Bills", "Items Sold", "Gross Sales (₹)",
+            "Discounts (₹)", "GST Tax (₹)", "Net Sales (₹)", "Cash (₹)",
+            "UPI (₹)", "Card (₹)", "Expenses (₹)", "Day Margin (₹)", "Void Bills"
+        ];
+        for (col, h) in day_headers.iter().enumerate() {
+            ws_days.write_with_format(table_start_row, col as u16, *h, &header_fmt).map_err(|e| e.to_string())?;
+        }
+
+        let mut curr_row = table_start_row + 1;
+        for (date_str, stat) in &daily_map {
+            let day_name = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                .map(|d| d.format("%A").to_string())
+                .unwrap_or_else(|_| "".to_string());
+
+            let margin = stat.net_paise - stat.expenses_paise;
+
+            ws_days.write_with_format(curr_row, 0, date_str.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 1, day_name.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 2, stat.total_bills as f64, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 3, stat.total_items as f64, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 4, stat.gross_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 5, stat.discount_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 6, stat.gst_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 7, stat.net_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 8, stat.cash_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 9, stat.upi_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 10, stat.card_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 11, stat.expenses_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 12, margin as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_days.write_with_format(curr_row, 13, stat.void_bills as f64, &center_fmt).map_err(|e| e.to_string())?;
+
+            curr_row += 1;
+        }
+
+        // GRAND TOTAL ROW at bottom of Day-by-Day Table!
+        ws_days.write_with_format(curr_row, 0, "MONTH TOTALS", &total_label_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 1, format!("{} Days", daily_map.len()).as_str(), &total_label_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 2, tot_bills as f64, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 3, tot_items as f64, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 4, tot_gross as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 5, tot_discount as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 6, tot_gst as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 7, tot_net as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 8, tot_cash as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 9, tot_upi as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 10, tot_card as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 11, tot_exp as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 12, tot_net_cashflow as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_days.write_with_format(curr_row, 13, tot_void as f64, &total_label_fmt).map_err(|e| e.to_string())?;
+
+        ws_days.set_column_width(0, 14.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(1, 14.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(2, 10.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(3, 12.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(4, 16.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(5, 14.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(6, 14.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(7, 16.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(8, 14.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(9, 14.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(10, 14.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(11, 14.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(12, 16.0).map_err(|e| e.to_string())?;
+        ws_days.set_column_width(13, 12.0).map_err(|e| e.to_string())?;
+
+        // ==========================================
+        // SHEET 2: ALL BILLS REGISTER (CHRONOLOGICAL)
+        // ==========================================
+        let ws_bills = workbook.add_worksheet();
+        ws_bills.set_name("Bills Register").map_err(|e| e.to_string())?;
+
+        let bill_headers = [
+            "S.No", "Bill Number", "Date & Time", "Cashier", "Customer Name",
+            "Customer Phone", "Payment Method", "Items", "Subtotal (₹)",
+            "Discount (₹)", "GST Tax (₹)", "Grand Total (₹)", "Status"
+        ];
+        for (col, h) in bill_headers.iter().enumerate() {
+            ws_bills.write_with_format(0, col as u16, *h, &header_fmt).map_err(|e| e.to_string())?;
+        }
+
+        let mut b_subtotal_sum = 0i64;
+        let mut b_discount_sum = 0i64;
+        let mut b_gst_sum = 0i64;
+        let mut b_grand_sum = 0i64;
+
+        for (idx, b) in bills.iter().enumerate() {
+            let row = 1 + idx as u32;
+            ws_bills.write_with_format(row, 0, (idx + 1) as f64, &center_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 1, b.bill_number.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 2, b.created_at.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 3, b.cashier.as_str(), &text_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 4, b.customer_name.as_str(), &text_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 5, b.customer_phone.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 6, b.payment_method.to_uppercase().as_str(), &center_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 7, b.total_items as f64, &num_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 8, b.subtotal_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 9, b.discount_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 10, b.gst_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 11, b.grand_total_paise as f64 / 100.0, &num_fmt).map_err(|e| e.to_string())?;
+            ws_bills.write_with_format(row, 12, b.status.to_uppercase().as_str(), &center_fmt).map_err(|e| e.to_string())?;
+
+            if b.status != "void" {
+                b_subtotal_sum += b.subtotal_paise;
+                b_discount_sum += b.discount_paise;
+                b_gst_sum += b.gst_paise;
+                b_grand_sum += b.grand_total_paise;
+            }
+        }
+
+        let bills_total_row = 1 + bills.len() as u32;
+        ws_bills.write_with_format(bills_total_row, 0, "TOTAL", &total_label_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 1, format!("{} Invoices", bills.len()).as_str(), &total_label_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 2, "", &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 3, "", &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 4, "", &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 5, "", &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 6, "", &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 7, tot_items as f64, &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 8, b_subtotal_sum as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 9, b_discount_sum as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 10, b_gst_sum as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 11, b_grand_sum as f64 / 100.0, &total_fmt).map_err(|e| e.to_string())?;
+        ws_bills.write_with_format(bills_total_row, 12, "PAID ONLY", &total_label_fmt).map_err(|e| e.to_string())?;
+
+        ws_bills.set_column_width(0, 8.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(1, 16.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(2, 20.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(3, 14.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(4, 20.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(5, 16.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(6, 16.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(7, 10.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(8, 15.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(9, 14.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(10, 14.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(11, 16.0).map_err(|e| e.to_string())?;
+        ws_bills.set_column_width(12, 12.0).map_err(|e| e.to_string())?;
+
+        // ==========================================
+        // SHEET 3: ITEMS SOLD BREAKDOWN
+        // ==========================================
+        let ws_items = workbook.add_worksheet();
+        ws_items.set_name("Items Sold Analysis").map_err(|e| e.to_string())?;
+
+        let item_headers = [
+            "Item Code", "Product Name", "Category", "Quantity Sold",
+            "Avg Unit Price (₹)", "Total Sales (₹)", "Total Tax (₹)"
+        ];
+        for (col, h) in item_headers.iter().enumerate() {
+            ws_items.write_with_format(0, col as u16, *h, &header_fmt).map_err(|e| e.to_string())?;
+        }
+
+        let mut item_stmt = conn.prepare(
+            "SELECT 
+                COALESCE(p.product_code, 'N/A'),
+                bi.product_name,
+                COALESCE(c.name, 'General'),
+                COALESCE(SUM(bi.quantity), 0),
+                COALESCE(AVG(bi.unit_price_paise), 0),
+                COALESCE(SUM(bi.total_paise), 0),
+                COALESCE(SUM(bi.gst_amount_paise), 0)
+             FROM bill_items bi
+             JOIN bills b ON bi.bill_id = b.id
+             LEFT JOIN products p ON bi.product_id = p.id
+             LEFT JOIN categories c ON p.category_id = c.id
+             WHERE b.created_at >= ?1 AND b.created_at <= ?2 AND b.status != 'void'
+             GROUP BY bi.product_name
+             ORDER BY SUM(bi.total_paise) DESC"
+        ).map_err(|e| e.to_string())?;
+
+        let mut tot_item_qty = 0f64;
+        let mut tot_item_sales = 0f64;
+        let mut tot_item_tax = 0f64;
+
+        let item_rows: Vec<(String, String, String, f64, f64, f64, f64)> = item_stmt.query_map(params![month_start, month_end], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get::<_, f64>(4)? / 100.0,
+                r.get::<_, f64>(5)? / 100.0,
+                r.get::<_, f64>(6)? / 100.0,
+            ))
+        }).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
+
+        for (idx, (code, name, cat, qty, avg_price, sales, tax)) in item_rows.iter().enumerate() {
+            let row = 1 + idx as u32;
+            ws_items.write_with_format(row, 0, code.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+            ws_items.write_with_format(row, 1, name.as_str(), &text_fmt).map_err(|e| e.to_string())?;
+            ws_items.write_with_format(row, 2, cat.as_str(), &text_fmt).map_err(|e| e.to_string())?;
+            ws_items.write_with_format(row, 3, *qty, &num_fmt).map_err(|e| e.to_string())?;
+            ws_items.write_with_format(row, 4, *avg_price, &num_fmt).map_err(|e| e.to_string())?;
+            ws_items.write_with_format(row, 5, *sales, &num_fmt).map_err(|e| e.to_string())?;
+            ws_items.write_with_format(row, 6, *tax, &num_fmt).map_err(|e| e.to_string())?;
+
+            tot_item_qty += qty;
+            tot_item_sales += sales;
+            tot_item_tax += tax;
+        }
+
+        let item_tot_row = 1 + item_rows.len() as u32;
+        ws_items.write_with_format(item_tot_row, 0, "TOTAL", &total_label_fmt).map_err(|e| e.to_string())?;
+        ws_items.write_with_format(item_tot_row, 1, format!("{} Products Sold", item_rows.len()).as_str(), &total_label_fmt).map_err(|e| e.to_string())?;
+        ws_items.write_with_format(item_tot_row, 2, "", &total_fmt).map_err(|e| e.to_string())?;
+        ws_items.write_with_format(item_tot_row, 3, tot_item_qty, &total_fmt).map_err(|e| e.to_string())?;
+        ws_items.write_with_format(item_tot_row, 4, "", &total_fmt).map_err(|e| e.to_string())?;
+        ws_items.write_with_format(item_tot_row, 5, tot_item_sales, &total_fmt).map_err(|e| e.to_string())?;
+        ws_items.write_with_format(item_tot_row, 6, tot_item_tax, &total_fmt).map_err(|e| e.to_string())?;
+
+        ws_items.set_column_width(0, 14.0).map_err(|e| e.to_string())?;
+        ws_items.set_column_width(1, 30.0).map_err(|e| e.to_string())?;
+        ws_items.set_column_width(2, 20.0).map_err(|e| e.to_string())?;
+        ws_items.set_column_width(3, 14.0).map_err(|e| e.to_string())?;
+        ws_items.set_column_width(4, 16.0).map_err(|e| e.to_string())?;
+        ws_items.set_column_width(5, 18.0).map_err(|e| e.to_string())?;
+        ws_items.set_column_width(6, 16.0).map_err(|e| e.to_string())?;
+
+        // ==========================================
+        // SHEET 4: MONTHLY EXPENSES
+        // ==========================================
+        let ws_exp = workbook.add_worksheet();
+        ws_exp.set_name("Monthly Expenses").map_err(|e| e.to_string())?;
+
+        let exp_headers = ["Expense Date", "Category", "Description", "Payment Mode", "Amount (₹)", "Logged At"];
+        for (col, h) in exp_headers.iter().enumerate() {
+            ws_exp.write_with_format(0, col as u16, *h, &header_fmt).map_err(|e| e.to_string())?;
+        }
+
+        let mut tot_exp_sum = 0f64;
+        let mut exp_count = 0;
+
+        if exp_exists {
+            if let Ok(mut exp_list_stmt) = conn.prepare(
+                "SELECT expense_date, category, description, payment_method, amount_paise, created_at
+                 FROM expenses
+                 WHERE expense_date >= ?1 AND expense_date <= ?2 AND status = 'active'
+                 ORDER BY expense_date ASC"
+            ) {
+                if let Ok(exp_iter) = exp_list_stmt.query_map(params![month_start, month_end], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, f64>(4)? / 100.0,
+                        r.get::<_, String>(5)?,
+                    ))
+                }) {
+                    for (date, cat, desc, mode, amt, created) in exp_iter.flatten() {
+                        exp_count += 1;
+                        let row = exp_count as u32;
+                        ws_exp.write_with_format(row, 0, date.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+                        ws_exp.write_with_format(row, 1, cat.as_str(), &text_fmt).map_err(|e| e.to_string())?;
+                        ws_exp.write_with_format(row, 2, desc.as_str(), &text_fmt).map_err(|e| e.to_string())?;
+                        ws_exp.write_with_format(row, 3, mode.to_uppercase().as_str(), &center_fmt).map_err(|e| e.to_string())?;
+                        ws_exp.write_with_format(row, 4, amt, &num_fmt).map_err(|e| e.to_string())?;
+                        ws_exp.write_with_format(row, 5, created.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+
+                        tot_exp_sum += amt;
+                    }
+                }
+            }
+        }
+
+        let exp_tot_row = 1 + exp_count as u32;
+        ws_exp.write_with_format(exp_tot_row, 0, "TOTAL", &total_label_fmt).map_err(|e| e.to_string())?;
+        ws_exp.write_with_format(exp_tot_row, 1, format!("{} Expenses", exp_count).as_str(), &total_label_fmt).map_err(|e| e.to_string())?;
+        ws_exp.write_with_format(exp_tot_row, 2, "", &total_fmt).map_err(|e| e.to_string())?;
+        ws_exp.write_with_format(exp_tot_row, 3, "", &total_fmt).map_err(|e| e.to_string())?;
+        ws_exp.write_with_format(exp_tot_row, 4, tot_exp_sum, &total_fmt).map_err(|e| e.to_string())?;
+        ws_exp.write_with_format(exp_tot_row, 5, "", &total_fmt).map_err(|e| e.to_string())?;
+
+        ws_exp.set_column_width(0, 16.0).map_err(|e| e.to_string())?;
+        ws_exp.set_column_width(1, 20.0).map_err(|e| e.to_string())?;
+        ws_exp.set_column_width(2, 35.0).map_err(|e| e.to_string())?;
+        ws_exp.set_column_width(3, 16.0).map_err(|e| e.to_string())?;
+        ws_exp.set_column_width(4, 16.0).map_err(|e| e.to_string())?;
+        ws_exp.set_column_width(5, 20.0).map_err(|e| e.to_string())?;
+
+        // ==========================================
+        // SHEET 5: PRODUCTS & STOCK CATALOG
+        // ==========================================
+        let ws_prod = workbook.add_worksheet();
+        ws_prod.set_name("Products & Stock").map_err(|e| e.to_string())?;
+
+        let prod_headers = [
+            "Item Code", "Product Name", "Category", "Selling Price (₹)",
+            "Cost Price (₹)", "Current Stock", "Barcode", "Status"
+        ];
+        for (col, h) in prod_headers.iter().enumerate() {
+            ws_prod.write_with_format(0, col as u16, *h, &header_fmt).map_err(|e| e.to_string())?;
+        }
+
+        if let Ok(mut prod_stmt) = conn.prepare(
+            "SELECT 
+                p.product_code, p.name, COALESCE(c.name, 'General'),
+                p.selling_price_paise, COALESCE(p.buying_price_paise, 0),
+                COALESCE(i.current_stock, 0), COALESCE(p.barcode, ''), p.is_active
+             FROM products p
+             LEFT JOIN categories c ON p.category_id = c.id
+             LEFT JOIN inventory i ON p.id = i.product_id
+             ORDER BY c.name ASC, p.name ASC"
+        ) {
+            if let Ok(prod_iter) = prod_stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, f64>(3)? / 100.0,
+                    r.get::<_, f64>(4)? / 100.0,
+                    r.get::<_, f64>(5)?,
+                    r.get::<_, String>(6)?,
+                    if r.get::<_, bool>(7)? { "ACTIVE" } else { "INACTIVE" },
+                ))
+            }) {
+                for (idx, (code, name, cat, s_price, b_price, stock, barcode, status)) in prod_iter.flatten().enumerate() {
+                    let row = 1 + idx as u32;
+                    ws_prod.write_with_format(row, 0, code.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+                    ws_prod.write_with_format(row, 1, name.as_str(), &text_fmt).map_err(|e| e.to_string())?;
+                    ws_prod.write_with_format(row, 2, cat.as_str(), &text_fmt).map_err(|e| e.to_string())?;
+                    ws_prod.write_with_format(row, 3, s_price, &num_fmt).map_err(|e| e.to_string())?;
+                    ws_prod.write_with_format(row, 4, b_price, &num_fmt).map_err(|e| e.to_string())?;
+                    ws_prod.write_with_format(row, 5, stock, &num_fmt).map_err(|e| e.to_string())?;
+                    ws_prod.write_with_format(row, 6, barcode.as_str(), &center_fmt).map_err(|e| e.to_string())?;
+                    ws_prod.write_with_format(row, 7, status, &center_fmt).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+
+        ws_prod.set_column_width(0, 14.0).map_err(|e| e.to_string())?;
+        ws_prod.set_column_width(1, 30.0).map_err(|e| e.to_string())?;
+        ws_prod.set_column_width(2, 20.0).map_err(|e| e.to_string())?;
+        ws_prod.set_column_width(3, 16.0).map_err(|e| e.to_string())?;
+        ws_prod.set_column_width(4, 16.0).map_err(|e| e.to_string())?;
+        ws_prod.set_column_width(5, 14.0).map_err(|e| e.to_string())?;
+        ws_prod.set_column_width(6, 18.0).map_err(|e| e.to_string())?;
+        ws_prod.set_column_width(7, 12.0).map_err(|e| e.to_string())?;
+
+        // Ensure parent directory exists and save
+        if let Some(parent) = dest_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        workbook.save(dest_path).map_err(|e| format!("Failed to save monthly Excel workbook: {}", e))?;
+        Ok(dest_path.to_path_buf())
     }
 
     /// Generate comprehensive, Chartered Accountant-grade 8-sheet Master Excel Backup Workbook
@@ -1669,7 +2404,7 @@ impl BackupService {
         let file = File::open(path).map_err(|e| format!("Cannot open backup package: {}", e))?;
         let mut archive = ZipArchive::new(file).map_err(|e| format!("Cannot read backup package: {}", e))?;
 
-        let downloads_dir = Self::get_downloads_dir();
+        let downloads_dir = Self::get_billing_downloads_backups_dir();
         let archive_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Backup");
         let dest_filename = format!("{}_Data.xlsx", archive_stem);
         let dest_path = downloads_dir.join(&dest_filename);

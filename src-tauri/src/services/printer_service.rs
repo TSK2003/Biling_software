@@ -56,56 +56,86 @@ extern "system" {
 
 pub struct PrinterService;
 
+static PRINTER_CACHE: std::sync::Mutex<Option<(std::time::Instant, Vec<PrinterInfo>)>> = std::sync::Mutex::new(None);
+
 impl PrinterService {
-    /// Get the default Windows printer name
+    /// Get the default Windows printer name directly via Win32 API without recursive calls
     pub fn get_default_printer_name() -> Option<String> {
         #[cfg(windows)]
         unsafe {
             let mut size: u32 = 0;
-            // First call to get required buffer size
             let _ = GetDefaultPrinterW(std::ptr::null_mut(), &mut size);
-            if size == 0 {
-                return Self::get_default_printer_fallback();
+            if size > 0 {
+                let mut buffer: Vec<u16> = vec![0; size as usize];
+                if GetDefaultPrinterW(buffer.as_mut_ptr(), &mut size) != 0 {
+                    let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+                    let name = String::from_utf16_lossy(&buffer[..len]);
+                    if !name.trim().is_empty() {
+                        return Some(name.trim().to_string());
+                    }
+                }
             }
+        }
+        None
+    }
 
-            let mut buffer: Vec<u16> = vec![0; size as usize];
-            if GetDefaultPrinterW(buffer.as_mut_ptr(), &mut size) != 0 {
-                // Buffer includes null terminator
-                let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
-                let name = String::from_utf16_lossy(&buffer[..len]);
-                if !name.trim().is_empty() {
-                    return Some(name.trim().to_string());
+    /// List all installed Windows printers with caching to prevent rescanning loop
+    pub fn get_installed_printers() -> Vec<PrinterInfo> {
+        // Check cache first (valid for 15 seconds)
+        if let Ok(guard) = PRINTER_CACHE.lock() {
+            if let Some((timestamp, ref cached_printers)) = *guard {
+                if timestamp.elapsed() < std::time::Duration::from_secs(15) && !cached_printers.is_empty() {
+                    return cached_printers.clone();
                 }
             }
         }
 
-        Self::get_default_printer_fallback()
+        let mut printers = Self::query_system_printers();
+
+        // If no printers found via query, fallback to the default printer
+        if printers.is_empty() {
+            if let Some(def) = Self::get_default_printer_name() {
+                printers.push(PrinterInfo {
+                    name: def,
+                    is_default: true,
+                    is_online: true,
+                    port: None,
+                });
+            }
+        }
+
+        // Update cache
+        if let Ok(mut guard) = PRINTER_CACHE.lock() {
+            *guard = Some((std::time::Instant::now(), printers.clone()));
+        }
+
+        printers
     }
 
-    fn get_default_printer_fallback() -> Option<String> {
-        let printers = Self::get_installed_printers();
-        printers.iter().find(|p| p.is_default).map(|p| p.name.clone())
-            .or_else(|| printers.first().map(|p| p.name.clone()))
-    }
+    /// Internal helper that queries Windows printers via PowerShell
+    fn query_system_printers() -> Vec<PrinterInfo> {
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-CimInstance Win32_Printer | Select-Object Name, Default, PortName, PrinterStatus | ConvertTo-Json -Compress",
+        ]);
 
-    /// List all installed Windows printers
-    pub fn get_installed_printers() -> Vec<PrinterInfo> {
-        // Query printers using PowerShell CIM / WMI which returns reliable metadata
-        let output = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-Command",
-                "Get-CimInstance Win32_Printer | Select-Object Name, Default, PortName, PrinterStatus | ConvertTo-Json -Compress"
-            ])
-            .output();
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+
+        let output = cmd.output();
 
         if let Ok(out) = output {
             if out.status.success() {
                 let json_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if !json_str.is_empty() {
-                    // Could be a single object or an array of objects
-                    if let Ok(printers) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
-                        return printers.into_iter().filter_map(|val| {
+                    if let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(&json_str) {
+                        return items.into_iter().filter_map(|val| {
                             let name = val["Name"].as_str()?.to_string();
                             let is_default = val["Default"].as_bool().unwrap_or(false);
                             let port = val["PortName"].as_str().map(|s| s.to_string());
@@ -130,17 +160,7 @@ impl PrinterService {
             }
         }
 
-        // Fallback: check default printer
-        if let Some(def) = Self::get_default_printer_name() {
-            vec![PrinterInfo {
-                name: def,
-                is_default: true,
-                is_online: true,
-                port: None,
-            }]
-        } else {
-            Vec::new()
-        }
+        Vec::new()
     }
 
     /// Send raw bytes directly to a Windows printer via the Windows Print Spooler
@@ -403,7 +423,7 @@ impl PrinterService {
 
         // Invoice Metadata
         let mode_clean = match payment_method.to_lowercase().as_str() {
-            "upi_cash" => "UPI + CASH".to_string(),
+            "upi_cash" | "cash_upi" => "CASH + UPI".to_string(),
             other => other.replace('_', " + ").to_uppercase(),
         };
 
@@ -510,8 +530,20 @@ impl PrinterService {
         buf.extend_from_slice(Self::align_left_right("Payment Mode:", &mode_clean, width).as_bytes());
         buf.push(b'\n');
 
-        if let Some(tendered) = tendered_cash_paise {
-            let is_cash_type = payment_method.to_lowercase() == "cash" || payment_method.to_lowercase() == "upi_cash";
+        let is_split = payment_method.to_lowercase() == "upi_cash"
+            || payment_method.to_lowercase() == "cash_upi"
+            || (payment_method.to_lowercase().contains("upi") && payment_method.to_lowercase().contains("cash"));
+        if is_split {
+            let cash_part = tendered_cash_paise.unwrap_or(grand_total_paise / 2);
+            let upi_part = if grand_total_paise > cash_part { grand_total_paise - cash_part } else { 0 };
+            let cash_str = format!("Rs. {:.2}", (cash_part as f64) / 100.0);
+            let upi_str = format!("Rs. {:.2}", (upi_part as f64) / 100.0);
+            buf.extend_from_slice(Self::align_left_right("Cash Paid:", &cash_str, width).as_bytes());
+            buf.push(b'\n');
+            buf.extend_from_slice(Self::align_left_right("UPI Paid:", &upi_str, width).as_bytes());
+            buf.push(b'\n');
+        } else if let Some(tendered) = tendered_cash_paise {
+            let is_cash_type = payment_method.to_lowercase() == "cash";
             if tendered > 0 && is_cash_type {
                 let tendered_str = format!("Rs. {:.2}", (tendered as f64) / 100.0);
                 buf.extend_from_slice(Self::align_left_right("Tendered Cash:", &tendered_str, width).as_bytes());

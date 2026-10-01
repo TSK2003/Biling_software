@@ -418,17 +418,17 @@ function compressImageFile(file: File, maxDim = 400, quality = 0.8): Promise<str
             <table className="table w-full">
               <thead>
                 <tr>
-                  <th className="w-12 text-center">#</th>
-                  <th className="w-16 text-center">Image</th>
-                  <th className="w-28">Product Code</th>
-                  <th>Product Name</th>
-                  <th className="w-32">Category</th>
-                  <th className="w-28 text-center">Stock</th>
-                  <th className="w-28 text-right">Buying Rate ({currencySymbol})</th>
-                  <th className="w-32 text-right">Selling Price ({currencySymbol})</th>
-                  {gstEnabled && <th className="w-24 text-center">GST Rate</th>}
-                  <th className="w-24 text-center">Status</th>
-                  <th className="w-48 text-right">Actions</th>
+                  <th className="w-12 text-center whitespace-nowrap">#</th>
+                  <th className="w-16 text-center whitespace-nowrap">Image</th>
+                  <th className="whitespace-nowrap">Product Code</th>
+                  <th className="whitespace-nowrap">Product Name</th>
+                  <th className="whitespace-nowrap">Category</th>
+                  <th className="text-center whitespace-nowrap">Stock</th>
+                  <th className="text-right whitespace-nowrap">Buying Rate ({currencySymbol})</th>
+                  <th className="text-right whitespace-nowrap">Selling Price ({currencySymbol})</th>
+                  {gstEnabled && <th className="text-center whitespace-nowrap">GST Rate</th>}
+                  <th className="text-center whitespace-nowrap">Status</th>
+                  <th className="text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -449,12 +449,12 @@ function compressImageFile(file: File, maxDim = 400, quality = 0.8): Promise<str
                   filteredProducts.map((p, idx) => (
                     <tr key={p.id} className={!p.is_active ? 'opacity-60 bg-surface-50' : ''}>
                       {/* Product Sequential Index */}
-                      <td className="text-center font-mono text-xs font-bold text-surface-500">
+                      <td className="text-center font-mono text-xs font-bold text-surface-500 whitespace-nowrap">
                         #{idx + 1}
                       </td>
 
                       {/* Product Image Thumbnail */}
-                      <td>
+                      <td className="whitespace-nowrap">
                         <div className="w-10 h-10 rounded border border-surface-200 bg-surface-100 flex items-center justify-center overflow-hidden flex-shrink-0">
                           {p.image_path ? (
                             <img
@@ -470,14 +470,14 @@ function compressImageFile(file: File, maxDim = 400, quality = 0.8): Promise<str
                         </div>
                       </td>
 
-                      <td className="font-mono font-bold text-primary-700">
+                      <td className="font-mono font-bold text-primary-700 whitespace-nowrap">
                         {p.product_code}
                       </td>
-                      <td className="font-medium text-surface-900">
+                      <td className="font-semibold text-surface-900 whitespace-nowrap truncate max-w-[260px]" title={p.name}>
                         {p.name}
                       </td>
-                      <td>
-                        <span className="badge badge-neutral">
+                      <td className="whitespace-nowrap">
+                        <span className="badge badge-neutral whitespace-nowrap" title={p.category_name || 'General'}>
                           {p.category_name || 'General'}
                         </span>
                       </td>
@@ -506,17 +506,17 @@ function compressImageFile(file: File, maxDim = 400, quality = 0.8): Promise<str
                       </td>
 
                       {/* Buying Rate Column */}
-                      <td className="font-mono text-sm text-right text-surface-600">
+                      <td className="font-mono text-sm text-right text-surface-600 whitespace-nowrap">
                         {p.is_restockable && p.buying_price_paise
                           ? formatCurrency(p.buying_price_paise)
                           : <span className="text-surface-300">—</span>}
                       </td>
 
-                      <td className="font-mono font-semibold text-surface-900 text-right">
+                      <td className="font-mono font-semibold text-surface-900 text-right whitespace-nowrap">
                         {formatCurrency(p.selling_price_paise)}
                       </td>
                       {gstEnabled && (
-                        <td className="text-center">
+                        <td className="text-center whitespace-nowrap">
                           {p.gst_enabled && p.gst_percentage_x100 > 0 ? (
                             <span className="badge badge-info font-mono">
                               {p.gst_percentage_x100 / 100}%
@@ -526,7 +526,7 @@ function compressImageFile(file: File, maxDim = 400, quality = 0.8): Promise<str
                           )}
                         </td>
                       )}
-                      <td>
+                      <td className="text-center whitespace-nowrap">
                         {p.is_active ? (
                           <span className="badge badge-success">Active</span>
                         ) : (

@@ -95,18 +95,69 @@ pub fn clear_all_business_data(state: State<'_, AppState>) -> Result<(), String>
     Ok(())
 }
 
+use tauri_plugin_dialog::DialogExt;
+
 #[tauri::command]
-pub fn open_downloads_folder() -> Result<(), String> {
+pub fn pick_backup_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let folder = app.dialog().file().blocking_pick_folder();
+    Ok(folder.map(|p| p.to_string()))
+}
+
+#[tauri::command]
+pub fn pick_backup_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let file = app.dialog().file()
+        .add_filter("Billing Backup Archive", &["billingbackup", "zip"])
+        .blocking_pick_file();
+    Ok(file.map(|p| p.to_string()))
+}
+
+#[tauri::command]
+pub fn get_backup_folder_path(state: State<'_, AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+    let path = BackupService::get_backup_dir(&db);
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn set_backup_folder_path(state: State<'_, AppState>, path: String) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Path cannot be empty".to_string());
+    }
+    let p = std::path::PathBuf::from(trimmed);
+    std::fs::create_dir_all(&p).map_err(|e| format!("Failed to create folder: {}", e))?;
+    
+    let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+    let normalized = p.to_string_lossy().to_string();
+    db.conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('backup_folder_path', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = ?1",
+        rusqlite::params![normalized],
+    ).map_err(|e| format!("Database error: {}", e))?;
+
+    Ok(normalized)
+}
+
+#[tauri::command]
+pub fn open_downloads_folder(state: State<'_, AppState>) -> Result<(), String> {
+    let billing_downloads = if let Ok(db) = state.db.lock() {
+        BackupService::get_backup_dir(&db)
+    } else {
+        BackupService::get_billing_downloads_backups_dir()
+    };
     #[cfg(windows)]
     {
-        let downloads = BackupService::get_downloads_dir();
-        let _ = std::process::Command::new("explorer").arg(downloads).spawn();
+        let _ = std::process::Command::new("explorer").arg(&billing_downloads).spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = open::that(&billing_downloads);
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn show_in_file_manager(path: String) -> Result<(), String> {
+pub fn show_in_file_manager(state: State<'_, AppState>, path: String) -> Result<(), String> {
     #[cfg(windows)]
     {
         let p = std::path::Path::new(&path);
@@ -116,7 +167,7 @@ pub fn show_in_file_manager(path: String) -> Result<(), String> {
                 .arg(&path)
                 .spawn();
         } else {
-            open_downloads_folder()?;
+            open_downloads_folder(state)?;
         }
     }
     Ok(())
@@ -175,11 +226,11 @@ pub fn export_master_excel_backup(state: State<'_, AppState>) -> Result<String, 
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
 
     let now = chrono::Local::now();
-    let timestamp_str = now.format("%Y%m%d_%H%M%S").to_string();
-    let excel_filename = format!("Shop_Billing_Data_Backup_{}.xlsx", timestamp_str);
+    let month_str = now.format("%Y-%m").to_string();
+    let excel_filename = format!("Billing_Backup_{}.xlsx", month_str);
 
-    let downloads_dir = BackupService::get_downloads_dir();
-    let dest_path = downloads_dir.join(&excel_filename);
+    let billing_downloads_dir = BackupService::get_backup_dir(&db);
+    let dest_path = billing_downloads_dir.join(&excel_filename);
 
     let shop_name: String = db.conn.query_row(
         "SELECT value FROM settings WHERE key = 'shop_name'",
@@ -193,7 +244,13 @@ pub fn export_master_excel_backup(state: State<'_, AppState>) -> Result<String, 
         |r| r.get(0),
     ).unwrap_or_else(|_| "SHOP-BILLING-000001".to_string());
 
-    let generated_path = BackupService::generate_master_excel_backup_from_conn(&db.conn, &shop_name, &shop_id, &timestamp_str, &dest_path)?;
+    let generated_path = BackupService::generate_monthly_excel_backup_from_conn(
+        &db.conn,
+        &shop_name,
+        &shop_id,
+        &month_str,
+        &dest_path,
+    )?;
 
     // Highlight in explorer
     #[cfg(windows)]
@@ -231,21 +288,12 @@ pub fn create_aws_backup(state: State<'_, AppState>, backup_type: Option<String>
     let b_type = backup_type.unwrap_or_else(|| "manual".to_string());
     let record = BackupService::create_full_backup(&db, &b_type)?;
 
-    let downloads_dir = BackupService::get_downloads_dir();
+    let billing_downloads_dir = BackupService::get_backup_dir(&db);
     let package_path_obj = std::path::Path::new(&record.backup_path);
-    let file_stem = package_path_obj
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("backup");
 
-    let timestamp_part = if let Some(pos) = file_stem.rfind('_') {
-        &file_stem[pos+1..]
-    } else {
-        ""
-    };
-
-    let excel_filename = format!("Shop_Billing_Data_Backup_{}.xlsx", timestamp_part);
-    let excel_path = downloads_dir.join(&excel_filename);
+    let month_str = chrono::Local::now().format("%Y-%m").to_string();
+    let excel_filename = format!("Billing_Backup_{}.xlsx", month_str);
+    let excel_path = billing_downloads_dir.join(&excel_filename);
     let excel_path_str = if excel_path.exists() {
         excel_path.to_string_lossy().to_string()
     } else {
@@ -369,21 +417,12 @@ pub fn sync_to_gdrive(state: State<'_, AppState>, folder_id: Option<String>) -> 
         rusqlite::params![now_str],
     );
 
-    let downloads_dir = BackupService::get_downloads_dir();
+    let billing_downloads_dir = BackupService::get_backup_dir(&db);
     let package_path_obj = std::path::Path::new(&record.backup_path);
-    let file_stem = package_path_obj
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("backup");
 
-    let timestamp_part = if let Some(pos) = file_stem.rfind('_') {
-        &file_stem[pos+1..]
-    } else {
-        ""
-    };
-
-    let excel_filename = format!("Shop_Billing_Data_Backup_{}.xlsx", timestamp_part);
-    let excel_path = downloads_dir.join(&excel_filename);
+    let month_str = chrono::Local::now().format("%Y-%m").to_string();
+    let excel_filename = format!("Billing_Backup_{}.xlsx", month_str);
+    let excel_path = billing_downloads_dir.join(&excel_filename);
     let excel_path_str = if excel_path.exists() {
         excel_path.to_string_lossy().to_string()
     } else {

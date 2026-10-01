@@ -20,6 +20,7 @@ import {
 import { api } from '../../lib/ipc';
 import { Header } from '../../components/Header';
 import { Modal } from '../../components/Modal';
+import { CustomSelect } from '../../components/CustomSelect';
 import { formatDateDMY } from '../../lib/format';
 import type {
   Expense,
@@ -82,6 +83,72 @@ export const ExpensesPage: React.FC = () => {
 
   // Detail Modal
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
+
+  const formatCancellationTime = (timeStr?: string) => {
+    if (!timeStr) return '-';
+    try {
+      const parts = timeStr.trim().split(' ');
+      if (parts.length === 2) {
+        const [dPart, tPart] = parts;
+        const dFormatted = formatDateDMY(dPart);
+        const [hh, mm] = tPart.split(':');
+        const hour = parseInt(hh, 10);
+        const ampm = hour >= 12 ? 'PM' : 'AM';
+        const hour12 = hour % 12 || 12;
+        return `${dFormatted}, ${String(hour12).padStart(2, '0')}:${mm} ${ampm}`;
+      }
+      const d = new Date(timeStr);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleString('en-IN', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        });
+      }
+      return timeStr;
+    } catch {
+      return timeStr;
+    }
+  };
+
+  const formatRecordedDateTime = (timeStr?: string) => {
+    if (!timeStr) return '-';
+    try {
+      const clean = timeStr.trim();
+      if (clean.includes(' ')) {
+        const parts = clean.split(' ');
+        if (parts.length === 2) {
+          const [dPart, tPart] = parts;
+          const dFormatted = formatDateDMY(dPart);
+          const tParts = tPart.split(':');
+          if (tParts.length >= 2) {
+            const hour = parseInt(tParts[0], 10);
+            const mm = tParts[1];
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            const hour12 = hour % 12 || 12;
+            return `${dFormatted}, ${String(hour12).padStart(2, '0')}:${mm} ${ampm}`;
+          }
+        }
+      }
+      const d = new Date(clean.includes('T') ? clean : clean.replace(' ', 'T'));
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleString('en-IN', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        });
+      }
+      return timeStr;
+    } catch {
+      return timeStr;
+    }
+  };
 
   // Cancellation Modal
   const [cancellingExpense, setCancellingExpense] = useState<Expense | null>(null);
@@ -171,8 +238,11 @@ export const ExpensesPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    loadExpenses();
-  }, [dateFrom, dateTo, selectedCategoryId, selectedPaymentMethod, selectedStatus, page]);
+    const timer = setTimeout(() => {
+      loadExpenses();
+    }, searchQuery ? 300 : 0);
+    return () => clearTimeout(timer);
+  }, [dateFrom, dateTo, selectedCategoryId, selectedPaymentMethod, selectedStatus, page, searchQuery]);
 
   // Handle Search submit
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -586,41 +656,41 @@ export const ExpensesPage: React.FC = () => {
             {/* Category Filter */}
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-surface-600 whitespace-nowrap">Category:</span>
-              <select
-                value={selectedCategoryId}
-                onChange={(e) => {
-                  setSelectedCategoryId(e.target.value === 'all' ? 'all' : Number(e.target.value));
+              <CustomSelect
+                value={selectedCategoryId === 'all' ? 'all' : String(selectedCategoryId)}
+                onChange={(val) => {
+                  setSelectedCategoryId(val === 'all' ? 'all' : Number(val));
                   setPage(1);
                 }}
-                className="form-input text-xs h-9 min-w-[160px] rounded-lg border-surface-200 cursor-pointer bg-white"
-              >
-                <option value="all">All Categories</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { value: 'all', label: 'All Categories' },
+                  ...categories.map((c) => ({ value: String(c.id), label: c.name })),
+                ]}
+                className="w-48"
+                size="sm"
+              />
             </div>
 
             {/* Payment Method Filter */}
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-surface-600 whitespace-nowrap">Payment:</span>
-              <select
+              <CustomSelect
                 value={selectedPaymentMethod}
-                onChange={(e) => {
-                  setSelectedPaymentMethod(e.target.value);
+                onChange={(val) => {
+                  setSelectedPaymentMethod(val);
                   setPage(1);
                 }}
-                className="form-input text-xs h-9 min-w-[140px] rounded-lg border-surface-200 capitalize cursor-pointer bg-white"
-              >
-                <option value="all">All Methods</option>
-                <option value="cash">Cash</option>
-                <option value="upi">UPI</option>
-                <option value="card">Card</option>
-                <option value="bank_transfer">Bank Transfer</option>
-                <option value="cheque">Cheque</option>
-              </select>
+                options={[
+                  { value: 'all', label: 'All Methods' },
+                  { value: 'cash', label: 'Cash' },
+                  { value: 'upi', label: 'UPI' },
+                  { value: 'card', label: 'Card' },
+                  { value: 'bank_transfer', label: 'Bank Transfer' },
+                  { value: 'cheque', label: 'Cheque' },
+                ]}
+                className="w-40"
+                size="sm"
+              />
             </div>
 
             {/* Reset Filter Button */}
@@ -648,7 +718,7 @@ export const ExpensesPage: React.FC = () => {
         {/* Expenses Table Card with Status Tabs Header */}
         <div className="bg-white rounded-xl border border-surface-200 shadow-sm overflow-hidden">
           {/* Primary Status Navigation Tabs */}
-          <div className="flex flex-wrap items-center justify-between border-b border-surface-200 px-4 pt-2 bg-surface-50/60">
+          <div className="flex flex-wrap items-center justify-between border-b border-surface-200 px-4 pt-2 bg-surface-50/60 min-h-[48px]">
             <div className="flex items-center gap-2 -mb-px">
               <button
                 type="button"
@@ -656,9 +726,9 @@ export const ExpensesPage: React.FC = () => {
                   setSelectedStatus('active');
                   setPage(1);
                 }}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer rounded-t-lg ${
+                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors duration-150 cursor-pointer rounded-t-md ${
                   selectedStatus === 'active'
-                    ? 'border-emerald-600 text-emerald-800 bg-white shadow-xs font-extrabold'
+                    ? 'border-emerald-600 text-emerald-800 bg-white shadow-xs'
                     : 'border-transparent text-surface-600 hover:text-surface-900 hover:bg-surface-100/70'
                 }`}
               >
@@ -681,9 +751,9 @@ export const ExpensesPage: React.FC = () => {
                   setSelectedStatus('cancelled');
                   setPage(1);
                 }}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer rounded-t-lg ${
+                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors duration-150 cursor-pointer rounded-t-md ${
                   selectedStatus === 'cancelled'
-                    ? 'border-red-600 text-red-700 bg-white shadow-xs font-extrabold'
+                    ? 'border-red-600 text-red-700 bg-white shadow-xs'
                     : 'border-transparent text-surface-600 hover:text-red-600 hover:bg-surface-100/70'
                 }`}
               >
@@ -706,9 +776,9 @@ export const ExpensesPage: React.FC = () => {
                   setSelectedStatus('all');
                   setPage(1);
                 }}
-                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-all cursor-pointer rounded-t-lg ${
+                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors duration-150 cursor-pointer rounded-t-md ${
                   selectedStatus === 'all'
-                    ? 'border-primary-600 text-primary-700 bg-white shadow-xs font-extrabold'
+                    ? 'border-primary-600 text-primary-700 bg-white shadow-xs'
                     : 'border-transparent text-surface-600 hover:text-surface-900 hover:bg-surface-100/70'
                 }`}
               >
@@ -730,76 +800,61 @@ export const ExpensesPage: React.FC = () => {
             )}
           </div>
 
-          {/* Audit Notice Banner for Cancelled View */}
-          {selectedStatus === 'cancelled' && (
-            <div className="flex items-center justify-between px-5 py-2.5 bg-red-50/50 border-b border-red-100 text-xs text-red-800">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
-                <span>
-                  <strong>Cancelled Expense History</strong>: These transactions were voided and removed from financial accounts and profit/loss calculations. Audit logs and cancellation reasons are preserved.
-                </span>
-              </div>
-              <span className="text-3xs font-bold text-red-600 uppercase tracking-wider bg-white px-2 py-0.5 rounded border border-red-200 whitespace-nowrap ml-2">
-                Audit Trail Active
-              </span>
-            </div>
-          )}
-
           {/* Table Container */}
           <div className="table-container">
             <table className="table w-full">
               <thead>
                 {selectedStatus === 'cancelled' ? (
                   <tr>
-                    <th className="w-[12%] text-left px-5 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[12%] text-left px-5 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Expense #
                     </th>
-                    <th className="w-[10%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[10%] text-left px-4 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Date
                     </th>
-                    <th className="w-[12%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[14%] text-left px-4 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Category
                     </th>
-                    <th className="w-[18%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[22%] text-left px-4 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Title & Payee
                     </th>
-                    <th className="w-[12%] text-right px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[12%] text-right px-4 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Voided Amount
                     </th>
-                    <th className="w-[16%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[12%] text-center px-3 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Cancelled By & Date
                     </th>
-                    <th className="w-[14%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[12%] text-center px-3 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Cancellation Reason
                     </th>
-                    <th className="w-[6%] text-right px-5 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[6%] text-right px-5 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       View
                     </th>
                   </tr>
                 ) : (
                   <tr>
-                    <th className="w-[11%] text-left px-5 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[12%] text-left px-5 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Expense #
                     </th>
-                    <th className="w-[10%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[10%] text-left px-4 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Date
                     </th>
-                    <th className="w-[14%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[14%] text-left px-4 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Category
                     </th>
-                    <th className="w-[24%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[22%] text-left px-4 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Title & Payee
                     </th>
-                    <th className="w-[13%] text-right px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[12%] text-right px-4 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Amount
                     </th>
-                    <th className="w-[10%] text-center px-3 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[12%] text-center px-3 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Payment
                     </th>
-                    <th className="w-[9%] text-center px-3 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[12%] text-center px-3 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Status
                     </th>
-                    <th className="w-[9%] text-right px-5 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                    <th className="w-[6%] text-right px-5 py-3 text-2xs font-bold text-surface-600 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200 whitespace-nowrap">
                       Actions
                     </th>
                   </tr>
@@ -856,9 +911,12 @@ export const ExpensesPage: React.FC = () => {
                             </div>
                           </td>
 
-                          {/* 2. Date */}
+                          {/* 2. Date & Recorded Time */}
                           <td className="px-4 py-3 text-xs text-surface-600 font-mono">
-                            {formatDateDMY(exp.expense_date)}
+                            <div className="font-semibold text-surface-800">{formatDateDMY(exp.expense_date)}</div>
+                            <div className="text-3xs text-surface-400 mt-0.5" title="Original Recorded Date & Time">
+                              Rec: {formatRecordedDateTime(exp.created_at)}
+                            </div>
                           </td>
 
                           {/* 3. Category */}
@@ -891,12 +949,7 @@ export const ExpensesPage: React.FC = () => {
                           {/* 6. Cancelled At & By */}
                           <td className="px-4 py-3 text-xs text-surface-700">
                             <div className="font-semibold text-2xs text-surface-800">
-                              {exp.cancelled_at ? formatDateDMY(exp.cancelled_at.split(' ')[0]) : '-'}
-                              {exp.cancelled_at && (
-                                <span className="text-3xs text-surface-500 font-normal ml-1">
-                                  {exp.cancelled_at.split(' ')[1] || ''}
-                                </span>
-                              )}
+                              {formatCancellationTime(exp.cancelled_at)}
                             </div>
                             <div className="text-3xs text-red-600 font-semibold mt-0.5">
                               By: {exp.cancelled_by_name || 'Staff User'}
@@ -1097,20 +1150,15 @@ export const ExpensesPage: React.FC = () => {
 
             <div className="form-group">
               <label className="form-label text-xs font-semibold">Category *</label>
-              <select
-                value={formCategoryId}
-                onChange={(e) => setFormCategoryId(Number(e.target.value))}
-                className="form-input text-sm"
-                required
-              >
-                {categories
+              <CustomSelect
+                value={String(formCategoryId)}
+                onChange={(val) => setFormCategoryId(Number(val))}
+                options={categories
                   .filter((c) => c.is_active || c.id === formCategoryId)
-                  .map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-              </select>
+                  .map((c) => ({ value: String(c.id), label: c.name }))}
+                className="w-full"
+                size="md"
+              />
             </div>
           </div>
 
@@ -1147,18 +1195,19 @@ export const ExpensesPage: React.FC = () => {
 
             <div className="form-group">
               <label className="form-label text-xs font-semibold">Payment Method *</label>
-              <select
+              <CustomSelect
                 value={formPaymentMethod}
-                onChange={(e) => setFormPaymentMethod(e.target.value)}
-                className="form-input text-sm capitalize"
-                required
-              >
-                <option value="cash">Cash</option>
-                <option value="upi">UPI</option>
-                <option value="card">Card</option>
-                <option value="bank_transfer">Bank Transfer</option>
-                <option value="cheque">Cheque</option>
-              </select>
+                onChange={setFormPaymentMethod}
+                options={[
+                  { value: 'cash', label: 'Cash' },
+                  { value: 'upi', label: 'UPI' },
+                  { value: 'card', label: 'Card' },
+                  { value: 'bank_transfer', label: 'Bank Transfer' },
+                  { value: 'cheque', label: 'Cheque' },
+                ]}
+                className="w-full"
+                size="md"
+              />
             </div>
           </div>
 
@@ -1285,12 +1334,15 @@ export const ExpensesPage: React.FC = () => {
                     "{detailExpense.cancelled_reason || 'No reason specified'}"
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center justify-between text-2xs text-red-700 pt-0.5 px-0.5">
+                <div className="flex flex-wrap items-center justify-between text-2xs text-red-700 pt-0.5 px-0.5 gap-2">
                   <span>
-                    <strong>Cancelled By:</strong> {detailExpense.cancelled_by_name || 'Staff User'}
+                    <strong>Recorded At:</strong> {formatRecordedDateTime(detailExpense.created_at)}
                   </span>
                   <span>
-                    <strong>Cancelled At:</strong> {detailExpense.cancelled_at || '-'}
+                    <strong>Cancelled At:</strong> {formatCancellationTime(detailExpense.cancelled_at)}
+                  </span>
+                  <span>
+                    <strong>Cancelled By:</strong> {detailExpense.cancelled_by_name || 'Staff User'}
                   </span>
                 </div>
               </div>
@@ -1302,6 +1354,12 @@ export const ExpensesPage: React.FC = () => {
                 <span className="text-3xs text-surface-400 uppercase font-bold block">Expense Date</span>
                 <span className="font-semibold text-surface-800 font-mono">
                   {formatDateDMY(detailExpense.expense_date)}
+                </span>
+              </div>
+              <div className="p-2.5 bg-surface-50/70 rounded-lg border border-surface-100">
+                <span className="text-3xs text-surface-400 uppercase font-bold block">Recorded Date & Time</span>
+                <span className="font-semibold text-surface-800 font-mono">
+                  {formatRecordedDateTime(detailExpense.created_at)}
                 </span>
               </div>
               <div className="p-2.5 bg-surface-50/70 rounded-lg border border-surface-100">
@@ -1349,7 +1407,7 @@ export const ExpensesPage: React.FC = () => {
             {/* Creation Audit */}
             <div className="text-3xs text-surface-400 flex items-center justify-between px-1">
               <span>Recorded by: {detailExpense.created_by_name || 'System User'}</span>
-              <span>Recorded on: {detailExpense.created_at}</span>
+              <span>Recorded on: {formatRecordedDateTime(detailExpense.created_at)}</span>
             </div>
 
             {/* Footer with properly aligned buttons */}

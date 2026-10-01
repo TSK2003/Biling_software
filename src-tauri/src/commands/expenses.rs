@@ -239,12 +239,14 @@ pub fn create_expense(
         _ => "cash".to_string(),
     };
 
+    let now_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
     tx.execute(
         "INSERT INTO expenses (
             expense_number, expense_date, category_id, title, description,
             amount_paise, payment_method, paid_by_user_id, payee, reference_number,
-            notes, status, created_by
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'active', ?12)",
+            notes, status, created_by, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'active', ?12, ?13, ?13)",
         params![
             next_number,
             request.expense_date,
@@ -258,6 +260,7 @@ pub fn create_expense(
             request.reference_number,
             request.notes,
             current_user.id,
+            now_str,
         ],
     ).map_err(|e| format!("Failed to record expense: {}", e))?;
 
@@ -399,10 +402,10 @@ pub fn cancel_expense(
             status = 'cancelled',
             cancelled_reason = ?1,
             cancelled_by = ?2,
-            cancelled_at = datetime('now'),
-            updated_at = datetime('now')
-         WHERE id = ?3",
-        params![reason, current_user.id, id],
+            cancelled_at = ?3,
+            updated_at = ?3
+         WHERE id = ?4",
+        params![reason, current_user.id, chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(), id],
     ).map_err(|e| format!("Failed to cancel expense: {}", e))?;
 
     // If it's a stock purchase, reduce the product's inventory!
@@ -546,11 +549,10 @@ pub fn get_expenses(
         let s = search.trim();
         if !s.is_empty() {
             let pattern = format!("%{}%", s);
-            conditions.push("(e.title LIKE ? OR e.payee LIKE ? OR e.reference_number LIKE ? OR e.notes LIKE ?)".to_string());
-            params_vec.push(Box::new(pattern.clone()));
-            params_vec.push(Box::new(pattern.clone()));
-            params_vec.push(Box::new(pattern.clone()));
-            params_vec.push(Box::new(pattern));
+            conditions.push("(e.title LIKE ? OR e.payee LIKE ? OR e.reference_number LIKE ? OR e.notes LIKE ? OR e.description LIKE ? OR CAST(e.expense_number AS TEXT) LIKE ? OR ('EXP-' || printf('%04d', e.expense_number)) LIKE ?)".to_string());
+            for _ in 0..7 {
+                params_vec.push(Box::new(pattern.clone()));
+            }
         }
     }
 

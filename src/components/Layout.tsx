@@ -1,5 +1,5 @@
-import React from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Outlet, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { useLicense } from '../contexts/LicenseContext';
@@ -9,6 +9,29 @@ import { isClientMode } from '../lib/ipc';
 export const Layout: React.FC = () => {
   const { user, isLoading: authLoading } = useAuth();
   const { isActivated, isLoading: licenseLoading } = useLicense();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Global F2 Shortcut -> Billing (POS)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F2' || e.code === 'F2' || e.keyCode === 113) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (location.pathname !== '/billing') {
+          navigate('/billing');
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('focus-billing-search'));
+          }, 80);
+        } else {
+          window.dispatchEvent(new CustomEvent('focus-billing-search'));
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [navigate, location.pathname]);
 
   if (licenseLoading || authLoading) {
     return (

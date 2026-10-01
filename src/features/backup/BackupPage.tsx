@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  FolderArchive,
   RefreshCw,
   FolderOpen,
   RotateCcw,
@@ -16,8 +15,6 @@ import {
   Key,
   CheckCircle2,
   HardDrive,
-  FileCheck,
-  Sparkles,
   ToggleLeft,
   ToggleRight,
 } from 'lucide-react';
@@ -37,8 +34,8 @@ function formatBytes(bytes: number): string {
 
 export const BackupPage: React.FC = () => {
   const [backups, setBackups] = useState<BackupRecord[]>([]);
-  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [backupFolderPath, setBackupFolderPath] = useState<string>('');
 
   // Daily Automatic Backup State
   const [autoBackupStatus, setAutoBackupStatus] = useState<AutoBackupStatus | null>(null);
@@ -75,6 +72,20 @@ export const BackupPage: React.FC = () => {
     try {
       const st = await api.getAutoBackupStatus();
       setAutoBackupStatus(st);
+      if (st?.folder_path) {
+        setBackupFolderPath(st.folder_path);
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  const loadBackupFolder = async () => {
+    try {
+      const folder = await api.getBackupFolder();
+      if (folder) {
+        setBackupFolderPath(folder);
+      }
     } catch {
       // Ignore
     }
@@ -83,7 +94,34 @@ export const BackupPage: React.FC = () => {
   useEffect(() => {
     loadBackups();
     loadAutoStatus();
+    loadBackupFolder();
   }, []);
+
+  const handleChooseBackupFolder = async () => {
+    try {
+      const selected = await api.pickBackupFolder();
+      if (selected) {
+        await api.setBackupFolder(selected);
+        setBackupFolderPath(selected);
+        toast.success(`Backup folder updated to: ${selected}`);
+        await Promise.all([loadBackups(), loadAutoStatus()]);
+      }
+    } catch (err: any) {
+      toast.error(typeof err === 'string' ? err : 'Failed to choose backup folder');
+    }
+  };
+
+  const handlePickRestoreFile = async () => {
+    try {
+      const selected = await api.pickBackupFile();
+      if (selected) {
+        setManualPathInput(selected);
+        handleStartRestoreFromFile(selected);
+      }
+    } catch {
+      fileInputRef.current?.click();
+    }
+  };
 
   const handleOpenDownloads = async () => {
     try {
@@ -144,26 +182,7 @@ export const BackupPage: React.FC = () => {
     }
   };
 
-  // 1. Create Local Backup (.billingbackup)
-  const handleCreateLocalBackup = async () => {
-    setIsCreatingBackup(true);
-    const toastId = toast.loading('Creating local database backup package...');
-    try {
-      const backupPath = await api.createBackup('manual');
-      toast.success(`Local backup created successfully! Saved to: ${backupPath}`, {
-        id: toastId,
-        duration: 5000,
-      });
-      await loadBackups();
-    } catch (err: any) {
-      const errMsg = typeof err === 'string' ? err : (err?.message || 'Failed to create local backup');
-      toast.error(errMsg, { id: toastId });
-    } finally {
-      setIsCreatingBackup(false);
-    }
-  };
-
-  // 2. Start restore process for a given file
+  // Restore process for a given file
   const handleStartRestoreFromFile = async (path: string) => {
     const target = path.trim();
     if (!target) {
@@ -231,86 +250,40 @@ export const BackupPage: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      {/* Overview Banner Card */}
-      <div className="card p-5 bg-white border border-surface-200 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary-100 text-primary-700 flex items-center justify-center flex-shrink-0 mt-0.5">
-              <HardDrive className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-surface-900">
-                  Local Database Backup & Disaster Recovery
-                </h3>
-                <span className="badge badge-success text-2xs font-semibold">
-                  Local Vault Active
-                </span>
-              </div>
-              <p className="text-xs text-surface-500 mt-1 max-w-2xl leading-relaxed">
-                Atomic local snapshots of your complete billing database, product catalogue, media assets, and business expenses.
-                Saved directly onto your computer's local drive as tamper-proof <span className="font-mono font-bold text-primary-700">.billingbackup</span> packages with SHA-256 integrity verification.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              type="button"
-              onClick={handleOpenDownloads}
-              className="btn-secondary text-xs flex items-center gap-1.5 py-2 px-3"
-              title="Open Backups / Downloads folder in Windows File Explorer"
-            >
-              <FolderOpen className="w-4 h-4 text-amber-600" />
-              <span>Open Downloads Folder</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenAppBackupsFolder}
-              className="btn-secondary text-xs flex items-center gap-1.5 py-2 px-3"
-              title="Open Installation Backups folder in Windows File Explorer"
-            >
-              <HardDrive className="w-4 h-4 text-primary-600" />
-              <span>Open App Backups</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Daily Automatic Backup Engine Card */}
-      <div className="card p-5 bg-gradient-to-r from-white via-primary-50/20 to-blue-50/30 border border-primary-200/90 shadow-sm rounded-2xl space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary-600 text-white flex items-center justify-center flex-shrink-0 shadow-xs">
-              <Sparkles className="w-5 h-5" />
+      {/* Unified Automatic Backup & Disaster Recovery Card */}
+      <div className="card p-4 bg-white border border-surface-200 shadow-sm rounded-lg space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-primary-50 text-primary-700 flex items-center justify-center flex-shrink-0">
+              <RefreshCw className="w-5 h-5 text-primary-600" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-extrabold text-surface-900">
-                  Daily Automatic Backup (Software Installation Folder)
+                <h3 className="text-sm font-bold text-surface-900">
+                  Automatic Backup & Disaster Recovery
                 </h3>
                 {autoBackupStatus?.enabled ? (
-                  <span className="badge badge-success text-2xs font-bold flex items-center gap-1">
+                  <span className="badge badge-success text-3xs font-bold flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3" />
-                    <span>Daily Vault Active</span>
+                    <span>Auto-Sync Active</span>
                   </span>
                 ) : (
-                  <span className="badge badge-danger text-2xs font-bold">
-                    Auto-Backup Paused
+                  <span className="badge badge-danger text-3xs font-bold">
+                    Auto-Sync Paused
                   </span>
                 )}
                 {autoBackupStatus?.last_date === new Date().toISOString().slice(0, 10) ? (
-                  <span className="badge badge-primary text-2xs font-semibold">
-                    Today's Snapshot Secured ({autoBackupStatus.last_date})
+                  <span className="badge badge-primary text-3xs font-semibold">
+                    Today Secured ({autoBackupStatus.last_date})
                   </span>
                 ) : (
-                  <span className="badge badge-warning text-2xs font-semibold">
-                    Today's Snapshot Pending
+                  <span className="badge badge-warning text-3xs font-semibold">
+                    Today Pending
                   </span>
                 )}
               </div>
-              <p className="text-xs text-surface-600 mt-1 max-w-2xl leading-relaxed">
-                The software automatically creates a complete tamper-proof backup package every day it opens, stored directly inside your software installation directory. You can restore any past day with a single click.
+              <p className="text-xs text-surface-500 mt-0.5">
+                Consolidated monthly backup with automatic daily append for sales, expenses, and GST.
               </p>
             </div>
           </div>
@@ -320,7 +293,7 @@ export const BackupPage: React.FC = () => {
               type="button"
               onClick={handleToggleAutoBackup}
               disabled={isTogglingAuto}
-              className={`btn-secondary text-xs flex items-center gap-1.5 py-2 px-3 font-semibold ${
+              className={`btn-secondary text-xs flex items-center gap-1.5 py-1.5 px-3 font-semibold rounded-md ${
                 autoBackupStatus?.enabled ? 'text-primary-700 border-primary-300' : 'text-surface-600'
               }`}
               title="Toggle automatic daily backups"
@@ -330,172 +303,160 @@ export const BackupPage: React.FC = () => {
               ) : (
                 <ToggleLeft className="w-4 h-4 text-surface-400" />
               )}
-              <span>{autoBackupStatus?.enabled ? 'Auto-Backup: Enabled' : 'Auto-Backup: Disabled'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleOpenAppBackupsFolder}
-              className="btn-secondary text-xs flex items-center gap-1.5 py-2 px-3 font-semibold"
-              title="Open Application Backups folder in Windows Explorer"
-            >
-              <FolderOpen className="w-4 h-4 text-amber-600" />
-              <span>Open Folder</span>
+              <span>{autoBackupStatus?.enabled ? 'Auto-Backup: On' : 'Auto-Backup: Off'}</span>
             </button>
 
             <button
               type="button"
               onClick={handleTriggerDailyBackup}
               disabled={isRunningDailyBackup}
-              className="btn-primary text-xs flex items-center gap-1.5 py-2 px-3 font-bold shadow-xs"
+              className="btn-primary text-xs flex items-center gap-1.5 py-1.5 px-3 font-bold rounded-md shadow-xs cursor-pointer"
               title="Trigger today's backup snapshot immediately"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isRunningDailyBackup ? 'animate-spin' : ''}`} />
-              <span>{isRunningDailyBackup ? 'Backing Up...' : "Run Today's Backup Now"}</span>
+              <span>{isRunningDailyBackup ? 'Backing Up...' : 'Backup Now'}</span>
             </button>
           </div>
         </div>
 
+        {/* Dedicated Backup Folder Selector Row */}
+        <div className="p-3 rounded-md bg-surface-50 border border-surface-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <FolderOpen className="w-4 h-4 text-primary-600 flex-shrink-0" />
+            <div className="min-w-0">
+              <span className="text-2xs font-semibold text-surface-500 uppercase tracking-wider block">
+                Backup Storage Location:
+              </span>
+              <span
+                className="font-mono text-xs font-bold text-surface-900 truncate block mt-0.5"
+                title={backupFolderPath}
+              >
+                {backupFolderPath || 'Configured Directory'}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={handleChooseBackupFolder}
+              className="btn-secondary text-xs flex items-center gap-1.5 py-1.5 px-3 font-semibold rounded-md shadow-2xs cursor-pointer"
+              title="Select custom folder on this device"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-primary-600" />
+              <span>Choose Backup Folder</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenDownloads}
+              className="btn-secondary text-xs flex items-center gap-1.5 py-1.5 px-2.5 font-semibold rounded-md shadow-2xs cursor-pointer"
+              title="Open backup folder in Windows File Explorer"
+            >
+              <HardDrive className="w-3.5 h-3.5 text-surface-600" />
+              <span>Open in Explorer</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenAppBackupsFolder}
+              className="btn-secondary text-xs flex items-center gap-1.5 py-1.5 px-2.5 font-semibold rounded-md shadow-2xs cursor-pointer"
+              title="Open internal application backup vault"
+            >
+              <Database className="w-3.5 h-3.5 text-primary-600" />
+              <span>App Vault</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Snapshot Summary Strip */}
         {autoBackupStatus && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3 border-t border-surface-200/80 text-2xs">
-            <div className="bg-white/85 p-2.5 rounded-xl border border-surface-200/80 shadow-2xs">
-              <span className="text-surface-500 block font-medium">Software Backups Location:</span>
-              <span className="font-mono font-bold text-primary-700 truncate block mt-0.5" title={autoBackupStatus.folder_path}>
-                {autoBackupStatus.folder_path}
-              </span>
-            </div>
-            <div className="bg-white/85 p-2.5 rounded-xl border border-surface-200/80 shadow-2xs">
-              <span className="text-surface-500 block font-medium">Last Auto-Backup Recorded:</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 text-2xs">
+            <div className="bg-surface-50 p-2.5 rounded-md border border-surface-200">
+              <span className="text-surface-500 block font-medium">Last Recorded Backup:</span>
               <span className="font-semibold text-surface-800 block mt-0.5">
-                {autoBackupStatus.last_date ? `${autoBackupStatus.last_date} ${autoBackupStatus.last_time ? `(${autoBackupStatus.last_time})` : ''}` : 'No daily backup recorded yet'}
+                {autoBackupStatus.last_date ? `${autoBackupStatus.last_date} ${autoBackupStatus.last_time ? `(${autoBackupStatus.last_time})` : ''}` : 'No backup recorded yet'}
               </span>
             </div>
-            <div className="bg-white/85 p-2.5 rounded-xl border border-surface-200/80 shadow-2xs">
-              <span className="text-surface-500 block font-medium">Daily Snapshots Available:</span>
+            <div className="bg-surface-50 p-2.5 rounded-md border border-surface-200">
+              <span className="text-surface-500 block font-medium">Snapshots Available:</span>
               <span className="font-bold text-surface-800 block mt-0.5">
-                {autoBackupStatus.total_backups} daily point-in-time archives
+                {autoBackupStatus.total_backups} monthly archive & ledger files
               </span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Main Action Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Card 1: Create Local Backup */}
-        <div className="card p-5 bg-white border border-surface-200 shadow-sm flex flex-col justify-between space-y-4 hover:border-primary-300 transition-colors">
-          <div className="space-y-2">
-            <div className="w-9 h-9 rounded-lg bg-primary-50 text-primary-700 flex items-center justify-center">
-              <FolderArchive className="w-5 h-5" />
+      {/* Restore from Local Backup Card */}
+      <div className="card p-4 bg-white border border-surface-200 shadow-sm rounded-lg space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-surface-100 pb-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-md bg-amber-50 text-amber-700 flex items-center justify-center">
+              <RotateCcw className="w-4 h-4" />
             </div>
             <div>
               <h4 className="text-sm font-bold text-surface-900">
-                Create Local Backup
+                Restore Database from Backup Package
               </h4>
-              <p className="text-xs text-surface-500 mt-1 leading-relaxed">
-                Generates a clean atomic snapshot of all products, categories, sales bills, payments, customers, and expenses into your local computer's backups folder.
+              <p className="text-2xs text-surface-500">
+                Restore database from any previously created .billingbackup package. Protected by Admin password.
               </p>
-            </div>
-
-            <div className="bg-surface-50 p-2.5 rounded-lg border border-surface-200 text-2xs text-surface-600 space-y-1">
-              <div className="flex items-center gap-1.5 font-medium text-surface-800">
-                <FileCheck className="w-3.5 h-3.5 text-primary-600" />
-                <span>Package Type: Standalone .billingbackup package</span>
-              </div>
-              <div className="text-surface-500">
-                Includes full SQLite WAL sync & SHA-256 cryptographic verification checksum.
-              </div>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={handleCreateLocalBackup}
-            disabled={isCreatingBackup}
-            className="btn-primary w-full py-2.5 text-xs font-bold flex items-center justify-center gap-2 shadow-xs"
+            onClick={handlePickRestoreFile}
+            className="btn-secondary text-xs font-bold py-1.5 px-3 rounded-md border-amber-300 hover:bg-amber-50 text-amber-900 flex items-center gap-1.5 shadow-2xs cursor-pointer flex-shrink-0"
           >
-            {isCreatingBackup ? (
-              <div className="spinner w-4 h-4 border-white" />
-            ) : (
-              <FolderArchive className="w-4 h-4" />
-            )}
-            <span>{isCreatingBackup ? 'Creating Backup Snapshot...' : 'Create Local Backup Now'}</span>
+            <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+            <span>Select & Restore File (.billingbackup)</span>
           </button>
         </div>
 
-        {/* Card 2: Restore from Local Backup */}
-        <div className="card p-5 bg-white border border-surface-200 shadow-sm flex flex-col justify-between space-y-4 hover:border-amber-300 transition-colors">
-          <div className="space-y-2">
-            <div className="w-9 h-9 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center">
-              <RotateCcw className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-surface-900">
-                Restore from Local File
-              </h4>
-              <p className="text-xs text-surface-500 mt-1 leading-relaxed">
-                Restore your database from any previously created <span className="font-mono text-amber-800 font-semibold">.billingbackup</span> package. Protected by Administrator password verification and automatic pre-restore safety snapshots.
-              </p>
-            </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".billingbackup,.zip"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              const filePath = (file as any).path || file.name;
+              handleStartRestoreFromFile(filePath);
+            }
+          }}
+        />
 
-            <div className="space-y-1.5">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".billingbackup,.zip"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    const filePath = (file as any).path || file.name;
-                    handleStartRestoreFromFile(filePath);
-                  }
-                }}
-              />
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={manualPathInput}
-                  onChange={(e) => setManualPathInput(e.target.value)}
-                  placeholder="Or enter full .billingbackup file path..."
-                  className="form-input text-xs font-mono py-1.5 flex-1"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleStartRestoreFromFile(manualPathInput)}
-                  disabled={!manualPathInput.trim()}
-                  className="btn-secondary text-xs py-1.5 px-3 whitespace-nowrap"
-                  title="Validate and restore from entered path"
-                >
-                  Load
-                </button>
-              </div>
-            </div>
-          </div>
-
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={manualPathInput}
+            onChange={(e) => setManualPathInput(e.target.value)}
+            placeholder="Or enter full .billingbackup file path to load..."
+            className="form-input text-xs font-mono py-1.5 px-3 flex-1 rounded-md h-9"
+          />
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="btn-secondary w-full py-2.5 text-xs font-bold border-amber-300 hover:bg-amber-50 text-amber-900 flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+            onClick={() => handleStartRestoreFromFile(manualPathInput)}
+            disabled={!manualPathInput.trim()}
+            className="btn-secondary text-xs py-1.5 px-4 font-semibold whitespace-nowrap rounded-md h-9"
+            title="Validate and restore from entered path"
           >
-            <RotateCcw className="w-4 h-4 text-amber-700" />
-            <span>Select & Restore File (.billingbackup)</span>
+            Load Package
           </button>
         </div>
       </div>
 
       {/* Local Backup History Table */}
-      <div className="card p-5 bg-white border border-surface-200 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-surface-100 pb-3">
+      <div className="card p-4 bg-white border border-surface-200 shadow-sm rounded-lg space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-surface-100 pb-2.5">
           <div>
             <h4 className="text-sm font-bold text-surface-900 flex items-center gap-2">
               <Database className="w-4 h-4 text-primary-600" />
               <span>Available Local Backups ({backups.length})</span>
             </h4>
-            <p className="text-2xs text-surface-500 mt-0.5">
-              Saved locally on this device. You can restore any point-in-time snapshot with 1 click.
-            </p>
           </div>
 
           <div className="flex items-center gap-2">

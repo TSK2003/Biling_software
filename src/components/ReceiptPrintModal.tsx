@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { Modal } from './Modal';
 import { api } from '../lib/ipc';
 import { useSettings } from '../contexts/SettingsContext';
-import { formatCurrency, amountInWordsINR, formatDateDMY } from '../lib/format';
+import { formatCurrency, amountInWordsINR, formatDateDMY, formatPaymentMethod } from '../lib/format';
 import type { CartItem } from '../types';
 
 export interface ReceiptBillItem {
@@ -30,6 +30,8 @@ export interface ReceiptBillData {
   gstTotalPaise: number;
   grandTotalPaise: number;
   paymentMethod: string;
+  cashAmountPaise?: number;
+  upiAmountPaise?: number;
   tenderedCashPaise?: number;
   changeDuePaise?: number;
 }
@@ -77,6 +79,30 @@ const Thermal80Receipt: React.FC<{
     : Math.max(0, billData.subtotalPaise - billData.discountAmountPaise);
   const halfGstPaise = Math.round(effectiveGstPaise / 2);
   const printClass = `print-${paperFormat.toLowerCase()}`;
+
+  const isSplit =
+    billData.paymentMethod === 'upi_cash' ||
+    billData.paymentMethod === 'cash_upi' ||
+    (billData.paymentMethod &&
+      billData.paymentMethod.toLowerCase().includes('upi') &&
+      billData.paymentMethod.toLowerCase().includes('cash')) ||
+    ((billData.cashAmountPaise ?? 0) > 0 && (billData.upiAmountPaise ?? 0) > 0);
+
+  const cashPart =
+    billData.cashAmountPaise !== undefined && billData.cashAmountPaise > 0
+      ? billData.cashAmountPaise
+      : billData.tenderedCashPaise &&
+        billData.tenderedCashPaise > 0 &&
+        billData.tenderedCashPaise < effectiveGrandTotalPaise
+      ? billData.tenderedCashPaise
+      : Math.floor(effectiveGrandTotalPaise / 2);
+
+  const upiPart =
+    billData.upiAmountPaise !== undefined && billData.upiAmountPaise > 0
+      ? billData.upiAmountPaise
+      : Math.max(0, effectiveGrandTotalPaise - cashPart);
+
+  const tenderedCash = billData.tenderedCashPaise || 0;
 
   return (
     <div
@@ -128,13 +154,13 @@ const Thermal80Receipt: React.FC<{
       {/* Bill Meta Row */}
       <div className="py-2 border-b border-dashed border-surface-400 text-3xs flex flex-col gap-0.5">
         <div className="flex justify-between items-center font-bold">
-          <span>INVOICE: #{billData.billNumber}</span>
+          <span>Bill: {String(billData.billNumber).padStart(5, '0')}</span>
           <span>{formatDateDMY(billData.businessDate)} {billData.billTime || ''}</span>
         </div>
         <div className="flex justify-between items-center text-surface-700">
           <span>Cashier: {billData.cashierName || 'Staff'}</span>
           <span className="font-bold uppercase text-black">
-            Mode: {billData.paymentMethod.replace('_', ' + ')}
+            Mode: {formatPaymentMethod(billData.paymentMethod)}
           </span>
         </div>
       </div>
@@ -221,10 +247,33 @@ const Thermal80Receipt: React.FC<{
         <div className="flex justify-between">
           <span>Payment Mode:</span>
           <span className="font-black uppercase text-black">
-            {billData.paymentMethod.replace('_', ' + ')}
+            {formatPaymentMethod(billData.paymentMethod)}
           </span>
         </div>
-        {billData.tenderedCashPaise && billData.tenderedCashPaise > 0 ? (
+        {isSplit ? (
+          <>
+            <div className="flex justify-between font-bold text-black">
+              <span>Cash Paid:</span>
+              <span className="tabular-nums">{formatCurrency(cashPart)}</span>
+            </div>
+            <div className="flex justify-between font-bold text-black">
+              <span>UPI Paid:</span>
+              <span className="tabular-nums">{formatCurrency(upiPart)}</span>
+            </div>
+            {tenderedCash > cashPart && (
+              <>
+                <div className="flex justify-between text-surface-600">
+                  <span>Tendered Cash:</span>
+                  <span className="tabular-nums">{formatCurrency(tenderedCash)}</span>
+                </div>
+                <div className="flex justify-between font-black text-black">
+                  <span>Change Returned:</span>
+                  <span className="tabular-nums">{formatCurrency(tenderedCash - cashPart)}</span>
+                </div>
+              </>
+            )}
+          </>
+        ) : billData.tenderedCashPaise && billData.tenderedCashPaise > 0 ? (
           <>
             <div className="flex justify-between">
               <span>Tendered Cash:</span>
@@ -281,6 +330,30 @@ const Thermal58Receipt: React.FC<{
     ? billData.grandTotalPaise
     : Math.max(0, billData.subtotalPaise - billData.discountAmountPaise);
 
+  const isSplit =
+    billData.paymentMethod === 'upi_cash' ||
+    billData.paymentMethod === 'cash_upi' ||
+    (billData.paymentMethod &&
+      billData.paymentMethod.toLowerCase().includes('upi') &&
+      billData.paymentMethod.toLowerCase().includes('cash')) ||
+    ((billData.cashAmountPaise ?? 0) > 0 && (billData.upiAmountPaise ?? 0) > 0);
+
+  const cashPart =
+    billData.cashAmountPaise !== undefined && billData.cashAmountPaise > 0
+      ? billData.cashAmountPaise
+      : billData.tenderedCashPaise &&
+        billData.tenderedCashPaise > 0 &&
+        billData.tenderedCashPaise < effectiveGrandTotalPaise
+      ? billData.tenderedCashPaise
+      : Math.floor(effectiveGrandTotalPaise / 2);
+
+  const upiPart =
+    billData.upiAmountPaise !== undefined && billData.upiAmountPaise > 0
+      ? billData.upiAmountPaise
+      : Math.max(0, effectiveGrandTotalPaise - cashPart);
+
+  const tenderedCash = billData.tenderedCashPaise || 0;
+
   return (
     <div
       id="printable-receipt"
@@ -321,12 +394,12 @@ const Thermal58Receipt: React.FC<{
       {/* Meta */}
       <div className="py-1 border-b border-dashed border-surface-400 text-4xs flex flex-col gap-0.5">
         <div className="flex justify-between items-center font-bold">
-          <span>INV: #{billData.billNumber}</span>
+          <span>Bill: {String(billData.billNumber).padStart(5, '0')}</span>
           <span>{formatDateDMY(billData.businessDate)} {billData.billTime ? billData.billTime.slice(0, 5) : ''}</span>
         </div>
         <div className="flex justify-between items-center text-surface-600">
           <span>By: {billData.cashierName || 'Staff'}</span>
-          <span className="font-bold text-black uppercase">{billData.paymentMethod.replace('_', '+')}</span>
+          <span className="font-bold text-black uppercase">{formatPaymentMethod(billData.paymentMethod)}</span>
         </div>
       </div>
 
@@ -379,18 +452,49 @@ const Thermal58Receipt: React.FC<{
       </div>
 
       {/* Tendered & Change */}
-      {billData.tenderedCashPaise && billData.tenderedCashPaise > 0 ? (
-        <div className="py-1 border-b border-dashed border-surface-400 text-4xs space-y-0.5 text-surface-700 font-mono">
-          <div className="flex justify-between">
-            <span>Cash Tendered:</span>
-            <span className="tabular-nums">{formatCurrency(billData.tenderedCashPaise)}</span>
-          </div>
-          <div className="flex justify-between font-bold text-black">
-            <span>Change Return:</span>
-            <span className="tabular-nums">{formatCurrency(billData.changeDuePaise || Math.max(0, billData.tenderedCashPaise - effectiveGrandTotalPaise))}</span>
-          </div>
+      <div className="py-1 border-b border-dashed border-surface-400 text-4xs space-y-0.5 text-surface-700 font-mono">
+        <div className="flex justify-between">
+          <span>Mode:</span>
+          <span className="font-bold text-black uppercase">
+            {formatPaymentMethod(billData.paymentMethod)}
+          </span>
         </div>
-      ) : null}
+        {isSplit ? (
+          <>
+            <div className="flex justify-between font-bold text-black">
+              <span>Cash Paid:</span>
+              <span className="tabular-nums">{formatCurrency(cashPart)}</span>
+            </div>
+            <div className="flex justify-between font-bold text-black">
+              <span>UPI Paid:</span>
+              <span className="tabular-nums">{formatCurrency(upiPart)}</span>
+            </div>
+            {tenderedCash > cashPart && (
+              <>
+                <div className="flex justify-between text-surface-600">
+                  <span>Tendered:</span>
+                  <span className="tabular-nums">{formatCurrency(tenderedCash)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-black">
+                  <span>Change Return:</span>
+                  <span className="tabular-nums">{formatCurrency(tenderedCash - cashPart)}</span>
+                </div>
+              </>
+            )}
+          </>
+        ) : billData.tenderedCashPaise && billData.tenderedCashPaise > 0 ? (
+          <>
+            <div className="flex justify-between">
+              <span>Cash Tendered:</span>
+              <span className="tabular-nums">{formatCurrency(billData.tenderedCashPaise)}</span>
+            </div>
+            <div className="flex justify-between font-bold text-black">
+              <span>Change Return:</span>
+              <span className="tabular-nums">{formatCurrency(billData.changeDuePaise || Math.max(0, billData.tenderedCashPaise - effectiveGrandTotalPaise))}</span>
+            </div>
+          </>
+        ) : null}
+      </div>
 
       {/* Footer Thank You Note */}
       <div className="pt-2 pb-0.5 text-center">
@@ -440,6 +544,30 @@ const A4TaxInvoice: React.FC<{
   const halfGstPaise = Math.round(effectiveGstPaise / 2);
   const printClass = `print-${paperFormat.toLowerCase()}`;
 
+  const isSplit =
+    billData.paymentMethod === 'upi_cash' ||
+    billData.paymentMethod === 'cash_upi' ||
+    (billData.paymentMethod &&
+      billData.paymentMethod.toLowerCase().includes('upi') &&
+      billData.paymentMethod.toLowerCase().includes('cash')) ||
+    ((billData.cashAmountPaise ?? 0) > 0 && (billData.upiAmountPaise ?? 0) > 0);
+
+  const cashPart =
+    billData.cashAmountPaise !== undefined && billData.cashAmountPaise > 0
+      ? billData.cashAmountPaise
+      : billData.tenderedCashPaise &&
+        billData.tenderedCashPaise > 0 &&
+        billData.tenderedCashPaise < effectiveGrandTotalPaise
+      ? billData.tenderedCashPaise
+      : Math.floor(effectiveGrandTotalPaise / 2);
+
+  const upiPart =
+    billData.upiAmountPaise !== undefined && billData.upiAmountPaise > 0
+      ? billData.upiAmountPaise
+      : Math.max(0, effectiveGrandTotalPaise - cashPart);
+
+  const tenderedCash = billData.tenderedCashPaise || 0;
+
   return (
     <div
       id="printable-receipt"
@@ -482,7 +610,7 @@ const A4TaxInvoice: React.FC<{
           </div>
           <div className="text-2xs space-y-0.5 text-surface-700">
             <div className="font-bold text-surface-950 text-xs">
-              Invoice #: <span className="font-mono text-primary-700">INV-#{billData.billNumber}</span>
+              Bill: <span className="font-mono text-primary-700">{String(billData.billNumber).padStart(5, '0')}</span>
             </div>
             <div>Date: <span className="font-semibold font-mono">{formatDateDMY(billData.businessDate)}</span></div>
             <div>Time: <span className="font-semibold font-mono">{billData.billTime || ''}</span></div>
@@ -504,7 +632,7 @@ const A4TaxInvoice: React.FC<{
             Cashier: <span className="font-semibold">{billData.cashierName || 'Administrator'}</span>
           </div>
           <div className="text-surface-700 font-medium">
-            Payment Method: <span className="font-bold uppercase text-surface-900">{billData.paymentMethod.replace('_', ' + ')}</span>
+            Payment Method: <span className="font-bold uppercase text-surface-900">{formatPaymentMethod(billData.paymentMethod)}</span>
           </div>
         </div>
       </div>
@@ -567,9 +695,26 @@ const A4TaxInvoice: React.FC<{
             </div>
             <div className="flex justify-between font-medium">
               <span className="text-surface-600">Payment Channel:</span>
-              <span className="font-bold text-surface-900 uppercase">{billData.paymentMethod.replace('_', ' + ')}</span>
+              <span className="font-bold text-surface-900 uppercase">{formatPaymentMethod(billData.paymentMethod)}</span>
             </div>
-            {billData.tenderedCashPaise && billData.tenderedCashPaise > 0 ? (
+            {isSplit ? (
+              <div className="pt-1 border-t border-surface-100 font-mono space-y-0.5">
+                <div className="flex justify-between text-surface-800 font-bold">
+                  <span>Cash Paid:</span>
+                  <span>{formatCurrency(cashPart)}</span>
+                </div>
+                <div className="flex justify-between text-surface-800 font-bold">
+                  <span>UPI Paid:</span>
+                  <span>{formatCurrency(upiPart)}</span>
+                </div>
+                {tenderedCash > cashPart && (
+                  <div className="flex justify-between text-surface-600 pt-0.5 border-t border-dashed border-surface-200">
+                    <span>Tendered Cash: {formatCurrency(tenderedCash)}</span>
+                    <span className="font-bold text-surface-900">Change Return: {formatCurrency(tenderedCash - cashPart)}</span>
+                  </div>
+                )}
+              </div>
+            ) : billData.tenderedCashPaise && billData.tenderedCashPaise > 0 ? (
               <div className="flex justify-between text-2xs pt-1 border-t border-surface-100 font-mono">
                 <span className="text-surface-600">Tendered: {formatCurrency(billData.tenderedCashPaise)}</span>
                 <span className="font-bold text-surface-900">Change Return: {formatCurrency(billData.changeDuePaise || Math.max(0, billData.tenderedCashPaise - effectiveGrandTotalPaise))}</span>
@@ -661,19 +806,34 @@ export const ReceiptPrintModal: React.FC<ReceiptPrintModalProps> = ({
 }) => {
   const { settings, gstEnabled } = useSettings();
 
-  // Strictly use the paper format configured by Admin in Settings or saved in localStorage
+  // Paper format configured by Admin in Settings or saved in localStorage
   const adminConfiguredSize: string =
     settings['printer_paper_size'] ||
     localStorage.getItem('pos_saved_paper_size') ||
     'Thermal80';
 
-  const isSheetFormat = ['A4', 'A5', 'B5', 'Letter'].includes(adminConfiguredSize);
-  const is58mm = adminConfiguredSize === 'Thermal58';
-
   const savedPrinterName =
     settings['printer_name'] ||
     localStorage.getItem('pos_saved_printer_name') ||
     undefined;
+
+  const isThermalPrinter = savedPrinterName
+    ? /thermal|rp3200|pos|receipt|tm-|tvs|star|xp-|mpt|zj-|bluetooth/i.test(savedPrinterName)
+    : false;
+
+  // If a thermal printer (like TVSE RP3200 Lite) is selected, ensure it displays the proper Thermal printer size (Thermal80 or Thermal58)
+  const defaultResolvedFormat = (isThermalPrinter && ['A4', 'A5', 'B5', 'Letter'].includes(adminConfiguredSize))
+    ? 'Thermal80'
+    : adminConfiguredSize;
+
+  const [activePaperFormat, setActivePaperFormat] = useState<string>(defaultResolvedFormat);
+
+  useEffect(() => {
+    setActivePaperFormat(defaultResolvedFormat);
+  }, [defaultResolvedFormat, isOpen]);
+
+  const isSheetFormat = ['A4', 'A5', 'B5', 'Letter'].includes(activePaperFormat);
+  const is58mm = activePaperFormat === 'Thermal58';
 
   const savedCopies =
     Number(settings['printer_copies']) ||
@@ -733,15 +893,15 @@ export const ReceiptPrintModal: React.FC<ReceiptPrintModalProps> = ({
         gst_total_paise: effectiveGstPaise,
         grand_total_paise: effectiveGrandTotalPaise,
         payment_method: billData.paymentMethod,
-        tendered_cash_paise: billData.tenderedCashPaise,
+        tendered_cash_paise: billData.cashAmountPaise || billData.tenderedCashPaise,
         change_due_paise: effectiveChangeDuePaise,
-        paper_size: adminConfiguredSize,
+        paper_size: activePaperFormat,
         printer_name: savedPrinterName,
         copies: savedCopies,
         shop_logo: shopLogo || undefined,
       });
 
-      toast.success(res || `Receipt #${billData.billNumber} printed successfully`);
+      toast.success(res || `Bill: ${String(billData.billNumber).padStart(5, '0')} printed successfully`);
     } catch (err: any) {
       console.error('Direct print failed:', err);
       const errMsg = typeof err === 'string' ? err : err?.message || 'Unable to print. Please verify the selected printer.';
@@ -780,7 +940,7 @@ export const ReceiptPrintModal: React.FC<ReceiptPrintModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={title || `Bill #${billData.billNumber} Completed`}
+      title={title || `Bill: ${String(billData.billNumber).padStart(5, '0')} Completed`}
       maxWidth={isSheetFormat ? '4xl' : 'lg'}
       footer={
         <div className="flex items-center justify-between gap-3 w-full">
@@ -817,17 +977,17 @@ export const ReceiptPrintModal: React.FC<ReceiptPrintModalProps> = ({
     >
       <div className="space-y-4">
         {/* Success Confirmation Banner */}
-        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+        <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
-              <CheckCircle2 className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
+              <CheckCircle2 className="w-4 h-4" />
             </div>
             <div>
               <div className="text-sm font-bold text-emerald-900">
                 Payment Completed Successfully!
               </div>
               <div className="text-2xs text-emerald-700 font-medium">
-                Bill #{billData.billNumber} • Recorded in database
+                Bill: {String(billData.billNumber).padStart(5, '0')} • Recorded in database
               </div>
             </div>
           </div>
@@ -842,7 +1002,7 @@ export const ReceiptPrintModal: React.FC<ReceiptPrintModalProps> = ({
 
         {/* Change Due Callout (if cash change exists) */}
         {effectiveChangeDuePaise > 0 && (
-          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between">
+          <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-between">
             <span className="text-xs font-bold text-amber-900 uppercase tracking-wide">
               Change to Return to Customer:
             </span>
@@ -852,47 +1012,10 @@ export const ReceiptPrintModal: React.FC<ReceiptPrintModalProps> = ({
           </div>
         )}
 
-        {/* Paper Format Status */}
-        <div className="bg-surface-100 px-3.5 py-2.5 rounded-xl border border-surface-200 flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2 text-xs font-bold text-surface-700">
-            <Printer className="w-4 h-4 text-primary-600" />
-            <span>Active Paper Format:</span>
-            <span className="px-2.5 py-0.5 rounded-md bg-white border border-surface-200 text-primary-700 font-bold text-xs shadow-2xs">
-              {adminConfiguredSize === 'Thermal80'
-                ? '80mm Thermal (Standard POS)'
-                : adminConfiguredSize === 'Thermal58'
-                ? '58mm Thermal (Mini Roll)'
-                : adminConfiguredSize === 'Thermal72'
-                ? '72mm Thermal (Mid POS)'
-                : adminConfiguredSize === 'Thermal100'
-                ? '100mm Thermal (Wide Slip)'
-                : adminConfiguredSize === 'A4'
-                ? 'Standard A4 Tax Invoice'
-                : adminConfiguredSize === 'A5'
-                ? 'Standard A5 Bill Sheet'
-                : adminConfiguredSize === 'B5'
-                ? 'Standard B5 Sheet'
-                : adminConfiguredSize === 'Letter'
-                ? 'US Letter Sheet'
-                : adminConfiguredSize === 'Continuous3Inch'
-                ? '3-Inch Continuous Roll'
-                : adminConfiguredSize}
-            </span>
-            {savedPrinterName && (
-              <span className="text-3xs text-surface-500 font-mono">
-                • Printer: {savedPrinterName}
-              </span>
-            )}
-          </div>
-          <span className="text-3xs text-surface-500 font-medium">
-            Configured in Settings
-          </span>
-        </div>
-
         {/* ========================================================= */}
         {/* PRINTABLE BILL RECEIPT (Visible on screen and on paper) */}
         {/* ========================================================= */}
-        <div className="overflow-x-auto p-1 bg-surface-100/60 rounded-xl border border-surface-200 flex justify-center">
+        <div className="overflow-x-auto p-2 bg-surface-50 rounded-lg border border-surface-200 flex justify-center">
           {is58mm ? (
             <Thermal58Receipt
               billData={billData}
@@ -918,7 +1041,7 @@ export const ReceiptPrintModal: React.FC<ReceiptPrintModalProps> = ({
               gstNumber={gstNumber}
               fssaiNumber={fssaiNumber}
               receiptFooter={receiptFooter}
-              paperFormat={adminConfiguredSize}
+              paperFormat={activePaperFormat}
             />
           ) : (
             <Thermal80Receipt
@@ -932,7 +1055,7 @@ export const ReceiptPrintModal: React.FC<ReceiptPrintModalProps> = ({
               gstNumber={gstNumber}
               fssaiNumber={fssaiNumber}
               receiptFooter={receiptFooter}
-              paperFormat={adminConfiguredSize}
+              paperFormat={activePaperFormat}
             />
           )}
         </div>

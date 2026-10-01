@@ -144,6 +144,10 @@ pub fn run() {
             commands::backup::get_auto_backup_status,
             commands::backup::set_auto_backup_enabled,
             commands::backup::open_app_backups_folder,
+            commands::backup::pick_backup_folder,
+            commands::backup::pick_backup_file,
+            commands::backup::get_backup_folder_path,
+            commands::backup::set_backup_folder_path,
             // Import commands
             commands::import::validate_excel_import,
             commands::import::execute_excel_import,

@@ -39,13 +39,34 @@ pub fn get_dashboard_stats(
             COUNT(b.id) as total_bills,
             COALESCE(SUM(b.discount_amount_paise), 0) as total_discount,
             COALESCE(SUM(b.gst_total_paise), 0) as total_gst,
-            COALESCE(SUM(p.cash_amount_paise), 0) as cash_sales,
-            COALESCE(SUM(p.upi_amount_paise), 0) as upi_sales,
-            COALESCE(SUM(p.card_amount_paise), 0) as card_sales
+            COALESCE(SUM(
+                CASE 
+                    WHEN COALESCE(p.payment_method, 'cash') = 'cash' THEN b.grand_total_paise
+                    WHEN p.payment_method = 'upi_cash' THEN COALESCE(p.cash_amount_paise, b.grand_total_paise)
+                    WHEN COALESCE(p.cash_amount_paise, 0) > 0 THEN MIN(p.cash_amount_paise, b.grand_total_paise)
+                    ELSE 0 
+                END
+            ), 0) as cash_sales,
+            COALESCE(SUM(
+                CASE 
+                    WHEN p.payment_method = 'upi' THEN b.grand_total_paise
+                    WHEN p.payment_method = 'upi_cash' THEN COALESCE(p.upi_amount_paise, 0)
+                    WHEN COALESCE(p.upi_amount_paise, 0) > 0 THEN MIN(p.upi_amount_paise, b.grand_total_paise)
+                    ELSE 0 
+                END
+            ), 0) as upi_sales,
+            COALESCE(SUM(
+                CASE 
+                    WHEN p.payment_method = 'card' THEN b.grand_total_paise
+                    WHEN COALESCE(p.card_amount_paise, 0) > 0 THEN MIN(p.card_amount_paise, b.grand_total_paise)
+                    ELSE 0 
+                END
+            ), 0) as card_sales
          FROM bills b
          LEFT JOIN payments p ON b.id = p.bill_id
          WHERE b.status IN ('completed', 'returned')
-           AND b.business_date >= ?1 AND b.business_date <= ?2",
+           AND ((b.business_date >= ?1 AND b.business_date <= ?2)
+                OR (substr(b.created_at, 1, 10) >= ?1 AND substr(b.created_at, 1, 10) <= ?2))",
         rusqlite::params![date_from, date_to],
         |row| {
             let total_sales: i64 = row.get(0)?;
@@ -72,7 +93,8 @@ pub fn get_dashboard_stats(
          FROM bill_items bi
          JOIN bills b ON bi.bill_id = b.id
          WHERE b.status IN ('completed', 'returned')
-           AND b.business_date >= ?1 AND b.business_date <= ?2",
+           AND ((b.business_date >= ?1 AND b.business_date <= ?2)
+                OR (substr(b.created_at, 1, 10) >= ?1 AND substr(b.created_at, 1, 10) <= ?2))",
         rusqlite::params![date_from, date_to],
         |row| row.get(0),
     ).unwrap_or(0);
@@ -82,7 +104,8 @@ pub fn get_dashboard_stats(
         "SELECT COALESCE(SUM(amount_paise), 0)
          FROM expenses
          WHERE status = 'active'
-           AND expense_date >= ?1 AND expense_date <= ?2",
+           AND ((expense_date >= ?1 AND expense_date <= ?2)
+                OR (substr(created_at, 1, 10) >= ?1 AND substr(created_at, 1, 10) <= ?2))",
         rusqlite::params![date_from, date_to],
         |row| row.get(0),
     ).unwrap_or(0);

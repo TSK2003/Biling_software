@@ -247,6 +247,7 @@ export const api = {
     dateFrom?: string;
     dateTo?: string;
     status?: string;
+    paymentMethod?: string;
     search?: string;
     categoryId?: number;
     page?: number;
@@ -257,6 +258,7 @@ export const api = {
       dateFrom: params.dateFrom,
       dateTo: params.dateTo,
       status: params.status,
+      paymentMethod: params.paymentMethod,
       search: params.search,
       categoryId: params.categoryId,
       page: params.page,
@@ -354,6 +356,14 @@ export const api = {
     invoke<void>('set_auto_backup_enabled', { enabled }),
   openAppBackupsFolder: () =>
     invoke<void>('open_app_backups_folder'),
+  pickBackupFolder: () =>
+    invoke<string | null>('pick_backup_folder'),
+  pickBackupFile: () =>
+    invoke<string | null>('pick_backup_file'),
+  getBackupFolder: () =>
+    invoke<string>('get_backup_folder_path'),
+  setBackupFolder: (path: string) =>
+    invoke<string>('set_backup_folder_path', { path }),
 
   // Import
   validateExcelImport: (filePath: string) =>

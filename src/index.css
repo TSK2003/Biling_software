@@ -101,7 +101,7 @@
 
   /* Cards */
   .card {
-    @apply bg-white rounded-xl border border-surface-200 shadow-sm;
+    @apply bg-white rounded-lg border border-surface-200 shadow-sm;
   }
 
   .card-header {
@@ -118,37 +118,37 @@
   }
 
   .stat-card-label {
-    @apply text-sm font-medium text-surface-500 uppercase tracking-wide;
+    @apply text-xs font-bold text-surface-500 uppercase tracking-wider;
   }
 
   .stat-card-value {
-    @apply text-2xl font-semibold text-surface-900 mt-1;
+    @apply text-xl font-bold text-surface-900 mt-1;
   }
 
   /* Buttons — base */
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 font-semibold text-sm rounded-lg 
+    @apply inline-flex items-center justify-center gap-1.5 font-semibold text-sm rounded-md 
            transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-1 
            disabled:opacity-50 disabled:cursor-not-allowed select-none;
   }
 
   .btn-primary {
-    @apply btn h-10 px-4 bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white 
+    @apply btn h-9 px-3.5 bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white 
            focus:ring-primary-500 shadow-sm;
   }
 
   .btn-secondary {
-    @apply btn h-10 px-4 bg-white hover:bg-surface-50 active:bg-surface-100 text-surface-700 
+    @apply btn h-9 px-3.5 bg-white hover:bg-surface-50 active:bg-surface-100 text-surface-700 
            border border-surface-300 focus:ring-surface-400 shadow-sm;
   }
 
   .btn-danger {
-    @apply btn h-10 px-4 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white 
+    @apply btn h-9 px-3.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white 
            focus:ring-red-500 shadow-sm;
   }
 
   .btn-success {
-    @apply btn h-10 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white 
+    @apply btn h-9 px-3.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white 
            focus:ring-emerald-500 shadow-sm;
   }
 
@@ -158,11 +158,11 @@
   }
 
   .btn-sm {
-    @apply h-8 px-3 text-xs rounded-md;
+    @apply h-8 px-2.5 text-xs rounded-md;
   }
 
   .btn-lg {
-    @apply h-12 px-6 text-base rounded-lg;
+    @apply h-11 px-5 text-base rounded-lg;
   }
 
   /* Form elements — taller and bigger text */
@@ -171,17 +171,17 @@
   }
 
   .form-label {
-    @apply text-sm font-semibold text-surface-700 flex items-center gap-1;
+    @apply text-xs font-bold text-surface-700 flex items-center gap-1;
   }
 
   .form-input {
-    @apply w-full h-10 px-3 text-sm bg-white border border-surface-300 rounded-lg 
+    @apply w-full h-9 px-3 text-sm bg-white border border-surface-300 rounded-md 
            focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 
            placeholder:text-surface-400 transition-colors shadow-sm;
   }
 
   .form-select {
-    @apply form-input appearance-none cursor-pointer pr-9 rounded-xl border-surface-300 bg-white text-surface-800;
+    @apply form-input appearance-none cursor-pointer pr-9 rounded-md border-surface-300 bg-white text-surface-800;
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
     background-position: right 0.65rem center;
     background-repeat: no-repeat;
@@ -193,7 +193,7 @@
   }
 
   .form-checkbox {
-    @apply w-5 h-5 rounded border-surface-300 text-primary-600 
+    @apply w-4 h-4 rounded border-surface-300 text-primary-600 
            focus:ring-primary-500/20 cursor-pointer;
   }
 
@@ -203,48 +203,48 @@
   }
 
   .table {
-    @apply w-full text-sm text-surface-700 border-collapse text-left;
+    @apply w-full text-sm text-surface-800 border-collapse text-left;
   }
 
   .table thead {
-    @apply bg-surface-50/80 border-b border-surface-200;
+    @apply bg-surface-50 border-b border-surface-200;
   }
 
   .table th {
-    @apply px-4 py-3 text-xs font-bold text-surface-500 uppercase tracking-wider select-none;
+    @apply px-3.5 py-2.5 text-xs font-bold text-surface-600 uppercase tracking-wider select-none;
   }
 
   .table td {
-    @apply px-4 py-3 border-b border-surface-100 align-middle;
+    @apply px-3.5 py-2.5 border-b border-surface-100 align-middle;
   }
 
   .table tbody tr:hover {
-    @apply bg-surface-50/60 transition-colors;
+    @apply bg-surface-50/80 transition-colors;
   }
 
   /* Badges — bigger text */
   .badge {
-    @apply inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border select-none;
+    @apply inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-md border select-none whitespace-nowrap;
   }
 
   .badge-success {
-    @apply bg-emerald-50 text-emerald-700 border-emerald-200;
+    @apply bg-emerald-50 text-emerald-800 border-emerald-200;
   }
 
   .badge-warning {
-    @apply bg-amber-50 text-amber-700 border-amber-200;
+    @apply bg-amber-50 text-amber-800 border-amber-200;
   }
 
   .badge-danger {
-    @apply bg-red-50 text-red-700 border-red-200;
+    @apply bg-red-50 text-red-800 border-red-200;
   }
 
   .badge-info {
-    @apply bg-primary-50 text-primary-700 border-primary-200;
+    @apply bg-primary-50 text-primary-800 border-primary-200;
   }
 
   .badge-neutral {
-    @apply bg-surface-100 text-surface-700 border-surface-200;
+    @apply bg-surface-100 text-surface-800 border-surface-200;
   }
 
   /* Modal */
@@ -253,7 +253,7 @@
   }
 
   .modal {
-    @apply bg-white rounded-xl shadow-xl border border-surface-200 
+    @apply bg-white rounded-lg shadow-xl border border-surface-200 
            max-h-[90vh] overflow-hidden flex flex-col z-50;
   }
 

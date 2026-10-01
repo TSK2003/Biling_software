@@ -17,7 +17,7 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
-import { formatCurrency, getTodayDateString, formatDateDMY } from '../../lib/format';
+import { formatCurrency, getTodayDateString, formatDateDMY, formatPaymentMethod } from '../../lib/format';
 import { Header } from '../../components/Header';
 import { Modal } from '../../components/Modal';
 import { ReceiptPrintModal } from '../../components/ReceiptPrintModal';
@@ -658,8 +658,8 @@ export const ReportsPage: React.FC = () => {
                           : ''
                       }`}
                     >
-                      <td className="font-mono font-bold text-primary-700 text-xs">
-                        #{b.bill_number}
+                      <td className="font-mono font-bold text-primary-700 text-xs whitespace-nowrap">
+                        Bill: {String(b.bill_number).padStart(5, '0')}
                       </td>
                       <td className="text-xs text-surface-700 font-mono">
                         <div>{formatDateDMY(b.business_date)}</div>
@@ -668,10 +668,10 @@ export const ReportsPage: React.FC = () => {
                       <td className="text-xs text-surface-800 font-medium">
                         {b.user_name || 'Staff'}
                       </td>
-                      <td className="text-xs font-mono">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-2xs font-semibold bg-surface-100 text-surface-800 border border-surface-200 uppercase">
+                      <td className="text-center whitespace-nowrap">
+                        <span className="badge badge-neutral font-semibold text-2xs inline-flex items-center gap-1">
                           {getPaymentIcon(b.payment_method)}
-                          {b.payment_method || 'Cash'}
+                          <span>{formatPaymentMethod(b.payment_method)}</span>
                         </span>
                       </td>
                       <td className="font-mono text-xs text-surface-600 text-right">
@@ -736,16 +736,16 @@ export const ReportsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Bill Details Modal */}
+      {/* Bill Details Modal — Full Landscape Width */}
       <Modal
         isOpen={isDetailOpen}
         onClose={() => setIsDetailOpen(false)}
         title={
           selectedBillDetail
-            ? `Bill #${selectedBillDetail.bill.bill_number} Detailed Breakdown`
+            ? `Bill: ${String(selectedBillDetail.bill.bill_number).padStart(5, '0')} Detailed Breakdown`
             : 'Loading Bill...'
         }
-        maxWidth="lg"
+        maxWidth="5xl"
         closeOnBackdropClick={false}
         footer={
           selectedBillDetail && (
@@ -781,8 +781,8 @@ export const ReportsPage: React.FC = () => {
             <div className="p-3 rounded-lg bg-surface-50 border border-surface-200 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
               <div>
                 <span className="text-surface-500">Bill Number:</span>
-                <div className="font-mono font-bold text-surface-900">
-                  #{selectedBillDetail.bill.bill_number}
+                <div className="font-mono font-bold text-surface-900 whitespace-nowrap">
+                  Bill: {String(selectedBillDetail.bill.bill_number).padStart(5, '0')}
                 </div>
               </div>
               <div>
@@ -808,33 +808,144 @@ export const ReportsPage: React.FC = () => {
               </div>
             </div>
 
+            {/* Returned Items Section (Task 4: If return is done, show returned product name & how many qty returned) */}
+            {((selectedBillDetail.returned_items && selectedBillDetail.returned_items.length > 0) ||
+              selectedBillDetail.items.some((it) => (it.returned_quantity && it.returned_quantity > 0) || it.quantity === 0) ||
+              selectedBillDetail.bill.status === 'returned' ||
+              selectedBillDetail.bill.status === 'cancelled') && (
+              <div className="space-y-2 p-3 bg-amber-50/70 rounded-xl border border-amber-200">
+                <div className="flex items-center gap-2 text-amber-900 font-bold text-xs uppercase tracking-wide">
+                  <RotateCcw className="w-4 h-4 text-amber-700" />
+                  <span>Returned Products & Quantities</span>
+                  <span className="ml-auto text-2xs font-mono font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+                    {selectedBillDetail.returned_items && selectedBillDetail.returned_items.length > 0
+                      ? `${selectedBillDetail.returned_items.length} ${selectedBillDetail.returned_items.length === 1 ? 'Product Returned' : 'Products Returned'}`
+                      : 'Returns Processed'}
+                  </span>
+                </div>
+
+                <div className="border border-amber-200 rounded-lg overflow-hidden bg-white shadow-2xs">
+                  <table className="table w-full text-xs">
+                    <thead className="bg-amber-100/60 text-amber-950 font-bold">
+                      <tr>
+                        <th className="py-2 text-left">Returned Product</th>
+                        <th className="py-2 text-center w-28">Returned Qty</th>
+                        <th className="py-2 text-right w-28">Unit Price</th>
+                        <th className="py-2 text-right w-28">Refund Amount</th>
+                        <th className="py-2 text-left w-36">Return Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-amber-100">
+                      {selectedBillDetail.returned_items && selectedBillDetail.returned_items.length > 0 ? (
+                        selectedBillDetail.returned_items.map((ret, idx) => (
+                          <tr key={ret.id || idx} className="hover:bg-amber-50/40">
+                            <td className="font-semibold text-surface-900 whitespace-nowrap">
+                              <span className="font-bold">{ret.product_name}</span>
+                              {ret.product_code && (
+                                <span className="text-3xs text-surface-400 font-mono ml-1.5">({ret.product_code})</span>
+                              )}
+                            </td>
+                            <td className="text-center font-mono">
+                              <span className="inline-flex items-center font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                {ret.quantity} {ret.quantity === 1 ? 'Unit' : 'Units'}
+                              </span>
+                            </td>
+                            <td className="text-right font-mono text-surface-700">
+                              {formatCurrency(ret.unit_price_paise)}
+                            </td>
+                            <td className="text-right font-mono font-bold text-red-600">
+                              -{formatCurrency(ret.line_total_paise || ret.unit_price_paise * ret.quantity)}
+                            </td>
+                            <td className="text-surface-700 text-2xs italic whitespace-nowrap">
+                              <span>"{ret.reason || 'Customer Return'}"</span>
+                              {ret.returned_at && (
+                                <span className="text-3xs text-surface-400 not-italic font-mono ml-1.5">
+                                  [{ret.returned_at}]
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        // Fallback synthesized from items
+                        selectedBillDetail.items
+                          .filter((it) => (it.returned_quantity && it.returned_quantity > 0) || it.quantity === 0)
+                          .map((it) => {
+                            const retQty = it.returned_quantity || 1;
+                            const refund = it.unit_price_paise * retQty;
+                            return (
+                              <tr key={it.id} className="hover:bg-amber-50/40">
+                                <td className="font-semibold text-surface-900 whitespace-nowrap">
+                                  <span className="font-bold">{it.product_name_snapshot || (it as any).product_name || 'Item'}</span>
+                                  <span className="text-3xs text-surface-400 font-mono ml-1.5">
+                                    ({it.product_code_snapshot || 'N/A'})
+                                  </span>
+                                </td>
+                                <td className="text-center font-mono">
+                                  <span className="inline-flex items-center font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                    {retQty} {retQty === 1 ? 'Unit' : 'Units'}
+                                  </span>
+                                </td>
+                                <td className="text-right font-mono text-surface-700">
+                                  {formatCurrency(it.unit_price_paise)}
+                                </td>
+                                <td className="text-right font-mono font-bold text-red-600">
+                                  -{formatCurrency(refund)}
+                                </td>
+                                <td className="text-surface-700 text-2xs italic whitespace-nowrap">
+                                  "{selectedBillDetail.bill.void_reason || 'Customer Return'}"
+                                </td>
+                              </tr>
+                            );
+                          })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Items Table */}
             <div>
-              <div className="text-xs font-bold text-surface-700 uppercase tracking-wide mb-1.5">
-                Purchased Line Items
+              <div className="text-xs font-bold text-surface-700 uppercase tracking-wide mb-1.5 flex items-center justify-between">
+                <span>Purchased Line Items</span>
+                <span className="text-3xs text-surface-400 font-normal lowercase">current remaining bill items</span>
               </div>
               <div className="border border-surface-200 rounded-lg overflow-hidden">
                 <table className="table w-full">
                   <thead>
                     <tr>
-                      <th>Product</th>
-                      <th>Category</th>
-                      <th className="text-right">Unit Price</th>
-                      <th className="text-center">Qty</th>
-                      <th className="text-right">Line Total</th>
+                      <th className="whitespace-nowrap">Product</th>
+                      <th className="whitespace-nowrap">Category</th>
+                      <th className="text-right whitespace-nowrap">Unit Price</th>
+                      <th className="text-center whitespace-nowrap">Active Qty</th>
+                      <th className="text-right whitespace-nowrap">Line Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selectedBillDetail.items.map((it) => (
                       <tr key={it.id}>
-                        <td className="font-medium text-surface-900 text-xs">
-                          {it.product_name_snapshot}
-                          <span className="text-2xs text-surface-400 block font-mono">
-                            {it.product_code_snapshot}
-                          </span>
+                        <td className="font-medium text-surface-900 text-xs whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-surface-950">
+                              {it.product_name_snapshot || (it as any).product_name || (it as any).name || 'Item'}
+                            </span>
+                            <span className="text-2xs text-surface-400 font-mono">
+                              ({it.product_code_snapshot || (it as any).product_code || (it as any).code || 'N/A'})
+                            </span>
+                            {(it.returned_quantity && it.returned_quantity > 0) ? (
+                              <span className="inline-flex text-3xs font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                {it.returned_quantity} Returned
+                              </span>
+                            ) : it.quantity === 0 ? (
+                              <span className="inline-flex text-3xs font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-800 border border-red-300">
+                                Fully Returned
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="text-surface-500 text-xs">
-                          {it.category_name_snapshot}
+                          {it.category_name_snapshot || (it as any).category_name || (it as any).category || 'General'}
                         </td>
                         <td className="text-right font-mono text-xs">
                           {formatCurrency(it.unit_price_paise)}
@@ -929,6 +1040,8 @@ export const ReportsPage: React.FC = () => {
             gstTotalPaise: selectedBillDetail.bill.gst_total_paise,
             grandTotalPaise: selectedBillDetail.bill.grand_total_paise,
             paymentMethod: selectedBillDetail.payment?.payment_method || selectedBillDetail.bill.payment_method || 'cash',
+            cashAmountPaise: selectedBillDetail.payment?.cash_amount_paise,
+            upiAmountPaise: selectedBillDetail.payment?.upi_amount_paise,
             tenderedCashPaise: selectedBillDetail.payment?.cash_amount_paise,
             changeDuePaise: (selectedBillDetail.payment?.cash_amount_paise || 0) > selectedBillDetail.bill.grand_total_paise
               ? (selectedBillDetail.payment?.cash_amount_paise || 0) - selectedBillDetail.bill.grand_total_paise

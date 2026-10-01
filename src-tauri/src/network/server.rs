@@ -17,6 +17,7 @@ use crate::models::{
     BillingProduct, CartItem, Category, CompleteBillResponse, Product, User,
     RegisterDeviceRequest, RegisterDeviceResponse, LoginRequest, LoginResponse,
     BillDetail, Bill, BillItem, Payment, DashboardStats, SalesTrendItem,
+    ReturnedBillItemRecord,
 };
 
 #[derive(Clone)]
@@ -50,6 +51,7 @@ pub struct BillsListQuery {
     pub date_from: Option<String>,
     pub date_to: Option<String>,
     pub status: Option<String>,
+    pub payment_method: Option<String>,
     pub search: Option<String>,
     pub category_id: Option<i64>,
     pub page: Option<i32>,
@@ -1014,6 +1016,13 @@ async fn get_bills_history(
             params_vec.push(Box::new(s.to_string()));
         }
     }
+    if let Some(ref pm) = query.payment_method {
+        let pm = pm.trim();
+        if !pm.is_empty() {
+            conditions.push(format!("p.payment_method = ?{}", params_vec.len() + 1));
+            params_vec.push(Box::new(pm.to_string()));
+        }
+    }
     if let Some(cat_id) = query.category_id {
         conditions.push(format!(
             "EXISTS (SELECT 1 FROM bill_items bi LEFT JOIN products p ON bi.product_id = p.id WHERE bi.bill_id = b.id AND (p.category_id = ?{0} OR bi.category_name_snapshot = (SELECT name FROM categories WHERE id = ?{0})))",
@@ -1125,12 +1134,18 @@ async fn get_bill_detail_endpoint(
     ).map_err(|_| (StatusCode::NOT_FOUND, "Bill not found".to_string()))?;
 
     let mut stmt = db.conn.prepare(
-        "SELECT id, bill_id, product_id, product_code_snapshot, product_name_snapshot,
-                category_name_snapshot, unit_price_paise, quantity, gst_enabled,
-                gst_percentage_x100, gst_amount_paise, line_total_paise
-         FROM bill_items
-         WHERE bill_id = ?1
-         ORDER BY sort_order ASC, id ASC"
+        "SELECT bi.id, bi.bill_id, bi.product_id,
+                COALESCE(NULLIF(bi.product_code_snapshot, ''), p.product_code, 'N/A') as product_code_snapshot,
+                COALESCE(NULLIF(bi.product_name_snapshot, ''), p.name, 'Item') as product_name_snapshot,
+                COALESCE(NULLIF(bi.category_name_snapshot, ''), c.name, 'General') as category_name_snapshot,
+                bi.unit_price_paise, bi.quantity, bi.gst_enabled,
+                bi.gst_percentage_x100, bi.gst_amount_paise, bi.line_total_paise,
+                COALESCE(bi.returned_quantity, 0) as returned_quantity
+         FROM bill_items bi
+         LEFT JOIN products p ON bi.product_id = p.id
+         LEFT JOIN categories c ON p.category_id = c.id
+         WHERE bi.bill_id = ?1
+         ORDER BY bi.sort_order ASC, bi.id ASC"
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to prepare query: {}", e)))?;
 
     let items: Vec<BillItem> = stmt.query_map(rusqlite::params![bill_id], |row| {
@@ -1147,6 +1162,7 @@ async fn get_bill_detail_endpoint(
             gst_percentage_x100: row.get(9)?,
             gst_amount_paise: row.get(10)?,
             line_total_paise: row.get(11)?,
+            returned_quantity: row.get(12).unwrap_or(0),
         })
     }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e)))?
     .filter_map(|r| r.ok())
@@ -1181,7 +1197,62 @@ async fn get_bill_detail_endpoint(
         created_at: bill.created_at.clone(),
     });
 
-    Ok(Json(BillDetail { bill, items, payment }))
+    let mut returned_items: Vec<ReturnedBillItemRecord> = {
+        let ret_stmt = db.conn.prepare(
+            "SELECT bri.id, bri.bill_id, bri.bill_item_id, bri.product_id, bri.product_name,
+                    bri.product_code, bri.quantity, bri.unit_price_paise, bri.line_total_paise,
+                    COALESCE(br.reason, 'Customer Return'), bri.created_at, u.display_name
+             FROM bill_return_items bri
+             LEFT JOIN bill_returns br ON bri.bill_return_id = br.id
+             LEFT JOIN users u ON br.user_id = u.id
+             WHERE bri.bill_id = ?1
+             ORDER BY bri.id ASC"
+        ).ok();
+
+        if let Some(mut s) = ret_stmt {
+            s.query_map(rusqlite::params![bill_id], |row| {
+                Ok(ReturnedBillItemRecord {
+                    id: row.get(0)?,
+                    bill_id: row.get(1)?,
+                    bill_item_id: row.get(2)?,
+                    product_id: row.get(3)?,
+                    product_name: row.get(4)?,
+                    product_code: row.get(5)?,
+                    quantity: row.get(6)?,
+                    unit_price_paise: row.get(7)?,
+                    line_total_paise: row.get(8)?,
+                    reason: row.get(9)?,
+                    returned_at: row.get(10)?,
+                    returned_by_name: row.get(11)?,
+                })
+            }).map(|mapped| mapped.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    };
+
+    if returned_items.is_empty() {
+        for it in &items {
+            if it.returned_quantity > 0 {
+                returned_items.push(ReturnedBillItemRecord {
+                    id: it.id,
+                    bill_id: it.bill_id,
+                    bill_item_id: it.id,
+                    product_id: it.product_id,
+                    product_name: it.product_name_snapshot.clone(),
+                    product_code: it.product_code_snapshot.clone(),
+                    quantity: it.returned_quantity,
+                    unit_price_paise: it.unit_price_paise,
+                    line_total_paise: it.unit_price_paise * (it.returned_quantity as i64),
+                    reason: bill.void_reason.clone().unwrap_or_else(|| "Customer Return".to_string()),
+                    returned_at: bill.created_at.clone(),
+                    returned_by_name: bill.user_name.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(Json(BillDetail { bill, items, payment, returned_items }))
 }
 
 async fn get_dashboard_stats_endpoint(
@@ -1199,9 +1270,29 @@ async fn get_dashboard_stats_endpoint(
             COUNT(b.id) as total_bills,
             COALESCE(SUM(b.discount_amount_paise), 0) as total_discount,
             COALESCE(SUM(b.gst_total_paise), 0) as total_gst,
-            COALESCE(SUM(p.cash_amount_paise), 0) as cash_sales,
-            COALESCE(SUM(p.upi_amount_paise), 0) as upi_sales,
-            COALESCE(SUM(p.card_amount_paise), 0) as card_sales
+            COALESCE(SUM(
+                CASE 
+                    WHEN COALESCE(p.payment_method, 'cash') = 'cash' THEN b.grand_total_paise
+                    WHEN p.payment_method = 'upi_cash' THEN COALESCE(p.cash_amount_paise, b.grand_total_paise)
+                    WHEN COALESCE(p.cash_amount_paise, 0) > 0 THEN MIN(p.cash_amount_paise, b.grand_total_paise)
+                    ELSE 0 
+                END
+            ), 0) as cash_sales,
+            COALESCE(SUM(
+                CASE 
+                    WHEN p.payment_method = 'upi' THEN b.grand_total_paise
+                    WHEN p.payment_method = 'upi_cash' THEN COALESCE(p.upi_amount_paise, 0)
+                    WHEN COALESCE(p.upi_amount_paise, 0) > 0 THEN MIN(p.upi_amount_paise, b.grand_total_paise)
+                    ELSE 0 
+                END
+            ), 0) as upi_sales,
+            COALESCE(SUM(
+                CASE 
+                    WHEN p.payment_method = 'card' THEN b.grand_total_paise
+                    WHEN COALESCE(p.card_amount_paise, 0) > 0 THEN MIN(p.card_amount_paise, b.grand_total_paise)
+                    ELSE 0 
+                END
+            ), 0) as card_sales
          FROM bills b
          LEFT JOIN payments p ON b.id = p.bill_id
          WHERE b.status IN ('completed', 'returned')
@@ -1242,7 +1333,8 @@ async fn get_dashboard_stats_endpoint(
         "SELECT COALESCE(SUM(amount_paise), 0)
          FROM expenses
          WHERE status = 'active'
-           AND expense_date >= ?1 AND expense_date <= ?2",
+           AND ((expense_date >= ?1 AND expense_date <= ?2)
+                OR (substr(created_at, 1, 10) >= ?1 AND substr(created_at, 1, 10) <= ?2))",
         rusqlite::params![date_from, date_to],
         |row| row.get(0),
     ).unwrap_or(0);
@@ -1375,7 +1467,7 @@ async fn void_bill(
             ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
             
             tx.execute(
-                "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes) VALUES (?1, ?2, 'void_reversal', ?3, ?4, ?5)",
+                "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes) VALUES (?1, ?2, 'return', ?3, ?4, ?5)",
                 rusqlite::params![product_id, *quantity as i32, id, user_id, format!("Stock restored: bill #{} voided via LAN. Reason: {}", id, reason.trim())],
             ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         }
@@ -1415,6 +1507,15 @@ async fn return_bill_endpoint(
 
     let tx = db.conn.transaction().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    let return_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    tx.execute(
+        "INSERT INTO bill_returns (bill_id, user_id, reason, refund_amount_paise, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![id, user_id, reason.trim(), refund_amount_paise, return_timestamp],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to record return transaction: {}", e)))?;
+    let bill_return_id = tx.last_insert_rowid();
+
     // 1. Return items back to inventory stock and record stock movements
     if let Some(items) = payload["items"].as_array() {
         if items.is_empty() {
@@ -1432,13 +1533,14 @@ async fn return_bill_endpoint(
             }
 
             if bill_item_id > 0 {
-                let item_data: Option<(i64, i64, i32, i32)> = tx.query_row(
-                    "SELECT quantity, unit_price_paise, gst_enabled, gst_percentage_x100 FROM bill_items WHERE id = ?1",
+                let item_data: Option<(i64, i64, i32, i32, String, String)> = tx.query_row(
+                    "SELECT quantity, unit_price_paise, gst_enabled, gst_percentage_x100, product_code_snapshot, product_name_snapshot 
+                     FROM bill_items WHERE id = ?1",
                     rusqlite::params![bill_item_id],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
                 ).ok();
 
-                let (current_qty, unit_price_db, gst_enabled, gst_percentage_x100) = item_data
+                let (current_qty, unit_price_db, gst_enabled, gst_percentage_x100, prod_code, prod_name) = item_data
                     .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Bill item {} not found", bill_item_id)))?;
 
                 if (qty as i64) > current_qty {
@@ -1465,24 +1567,37 @@ async fn return_bill_endpoint(
                 }
 
                 let price = if unit_price > 0 { unit_price } else { unit_price_db };
-                let new_item_qty = current_qty - qty as i64;
-                if new_item_qty <= 0 {
-                    tx.execute(
-                        "DELETE FROM bill_items WHERE id = ?1",
-                        rusqlite::params![bill_item_id],
-                    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to delete returned item: {}", e)))?;
+                let new_item_qty = (current_qty - qty as i64).max(0);
+                let new_line_total = if new_item_qty > 0 { new_item_qty * price } else { 0 };
+                let new_gst_amount = if new_item_qty > 0 && gst_enabled == 1 && gst_percentage_x100 > 0 {
+                    ((new_line_total * gst_percentage_x100 as i64) + 5000) / 10000
                 } else {
-                    let new_line_total = new_item_qty * price;
-                    let new_gst_amount = if gst_enabled == 1 && gst_percentage_x100 > 0 {
-                        ((new_line_total * gst_percentage_x100 as i64) + 5000) / 10000
-                    } else {
-                        0
-                    };
-                    tx.execute(
-                        "UPDATE bill_items SET quantity = ?1, line_total_paise = ?2, gst_amount_paise = ?3 WHERE id = ?4",
-                        rusqlite::params![new_item_qty, new_line_total, new_gst_amount, bill_item_id],
-                    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update bill item: {}", e)))?;
-                }
+                    0
+                };
+                tx.execute(
+                    "UPDATE bill_items SET quantity = ?1, returned_quantity = COALESCE(returned_quantity, 0) + ?2, line_total_paise = ?3, gst_amount_paise = ?4 WHERE id = ?5",
+                    rusqlite::params![new_item_qty, qty, new_line_total, new_gst_amount, bill_item_id],
+                ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update bill item: {}", e)))?;
+
+                let p_name = item["product_name"].as_str().or_else(|| item["productName"].as_str()).map(|s| s.to_string()).unwrap_or(prod_name);
+                let line_refund = price * (qty as i64);
+
+                let _ = tx.execute(
+                    "INSERT INTO bill_return_items (bill_return_id, bill_id, bill_item_id, product_id, product_name, product_code, quantity, unit_price_paise, line_total_paise, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    rusqlite::params![
+                        bill_return_id,
+                        id,
+                        bill_item_id,
+                        pid,
+                        p_name,
+                        prod_code,
+                        qty,
+                        price,
+                        line_refund,
+                        return_timestamp,
+                    ],
+                );
             }
         }
     }

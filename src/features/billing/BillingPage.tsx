@@ -235,6 +235,42 @@ export const BillingPage: React.FC = () => {
     );
   }, [tabs, activeTabId]);
 
+  // Robust search input focus helper
+  const focusSearchInput = useCallback(() => {
+    const doFocus = () => {
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+        searchInputRef.current.select();
+      } else {
+        const el = document.querySelector('input[data-search-input="true"]') as HTMLInputElement;
+        if (el) {
+          el.focus();
+          el.select();
+        }
+      }
+    };
+    doFocus();
+    requestAnimationFrame(doFocus);
+    setTimeout(doFocus, 50);
+  }, []);
+
+  // Listen for global F2 navigation event
+  useEffect(() => {
+    const onFocusEvent = () => {
+      focusSearchInput();
+    };
+    window.addEventListener('focus-billing-search', onFocusEvent);
+    return () => window.removeEventListener('focus-billing-search', onFocusEvent);
+  }, [focusSearchInput]);
+
+  // Autofocus search input on initial mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      focusSearchInput();
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [focusSearchInput]);
+
   // ========= Load initial categories & products =========
   useEffect(() => {
     const initData = async () => {
@@ -324,10 +360,16 @@ export const BillingPage: React.FC = () => {
         target.isContentEditable;
 
       // F2 or Ctrl+F → Search Focus
-      if (e.key === 'F2' || (e.ctrlKey && (e.key === 'f' || e.key === 'F'))) {
+      if (
+        e.key === 'F2' ||
+        e.code === 'F2' ||
+        e.keyCode === 113 ||
+        e.which === 113 ||
+        (e.ctrlKey && (e.key === 'f' || e.key === 'F'))
+      ) {
         e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        e.stopPropagation();
+        focusSearchInput();
         return;
       }
 
@@ -381,8 +423,8 @@ export const BillingPage: React.FC = () => {
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [cart, completedBill, tabs]);
 
   // ========= Cart Manipulations (tab-scoped) =========
@@ -642,8 +684,10 @@ export const BillingPage: React.FC = () => {
         gstTotalPaise: calculations.gstTotalPaise,
         grandTotalPaise: calculations.grandTotalPaise,
         paymentMethod,
+        cashAmountPaise: paymentMethod === 'upi_cash' ? cashPaise : (paymentMethod === 'cash' ? cashPaise : 0),
+        upiAmountPaise: paymentMethod === 'upi_cash' ? upiPaise : (paymentMethod === 'upi' ? upiPaise : 0),
         tenderedCashPaise: paymentMethod === 'cash' || paymentMethod === 'upi_cash' ? cashPaise : 0,
-        changeDuePaise: response.change_due_paise ?? Math.max(0, cashPaise - calculations.grandTotalPaise),
+        changeDuePaise: response.change_due_paise ?? (paymentMethod === 'cash' ? Math.max(0, cashPaise - calculations.grandTotalPaise) : 0),
       };
 
       setCompletedBill(response);
@@ -720,10 +764,7 @@ export const BillingPage: React.FC = () => {
         actions={
           <div className="flex items-center gap-1.5 lg:gap-2">
             <span className="text-xs font-mono font-bold text-primary-700 bg-primary-50 px-2.5 py-1.5 rounded-lg border border-primary-200 shadow-2xs whitespace-nowrap">
-              Bill #{activeTabIndex + 1}
-            </span>
-            <span className="text-xs font-mono text-surface-600 bg-surface-100 px-2.5 py-1.5 rounded-lg border border-surface-200 whitespace-nowrap hidden sm:inline-block">
-              Inv #{nextBillNumber}
+              Bill: {String(nextBillNumber).padStart(5, '0')}
             </span>
             <span className="text-xs font-mono text-surface-600 bg-surface-100 px-2.5 py-1.5 rounded-lg border border-surface-200 whitespace-nowrap hidden 2xl:inline-block">
               <kbd className="font-bold text-surface-800">F2</kbd> Search • <kbd className="font-bold text-surface-800">F4</kbd> Pay • <kbd className="font-bold text-surface-800">Ctrl+N</kbd> New
@@ -744,6 +785,8 @@ export const BillingPage: React.FC = () => {
                 <Search className="w-5 h-5 text-surface-400 absolute left-3.5 top-3.5" />
                 <input
                   ref={searchInputRef}
+                  id="billing-search-input"
+                  data-search-input="true"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -1014,7 +1057,7 @@ export const BillingPage: React.FC = () => {
                   </span>
                 </div>
                 <div className="text-[11px] text-surface-500 font-medium">
-                  Active POS Draft &bull; Next Invoice #{nextBillNumber}
+                  Active POS Draft &bull; Next Bill: {String(nextBillNumber).padStart(5, '0')}
                 </div>
               </div>
               <span className="badge badge-info text-xs px-2.5 py-0.5 ml-auto">
@@ -1541,7 +1584,7 @@ export const BillingPage: React.FC = () => {
                 }`}
               >
                 <span className="font-black text-xs leading-none">₹+QR</span>
-                <span className="text-sm font-bold">UPI+Cash</span>
+                <span className="text-sm font-bold">Cash + UPI</span>
               </button>
             </div>
           </div>

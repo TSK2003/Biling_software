@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Eye, Ban, RotateCcw, CheckCircle2, Printer, Calendar } from 'lucide-react';
 import { api } from '../../lib/ipc';
-import { formatCurrency, getTodayDateString, formatDateDMY } from '../../lib/format';
+import { formatCurrency, getTodayDateString, formatDateDMY, formatPaymentMethod } from '../../lib/format';
 import { Modal } from '../../components/Modal';
 import { Header } from '../../components/Header';
 import { ReceiptPrintModal } from '../../components/ReceiptPrintModal';
@@ -26,6 +26,7 @@ export const BillsPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -46,6 +47,7 @@ export const BillsPage: React.FC = () => {
   // Return Bill Modal
   const [isReturnOpen, setIsReturnOpen] = useState(false);
   const [returningBill, setReturningBill] = useState<Bill | null>(null);
+  const [returningBillDetail, setReturningBillDetail] = useState<BillDetail | null>(null);
   const [returnItems, setReturnItems] = useState<ReturnItemState[]>([]);
   const [returnReason, setReturnReason] = useState('');
   const [isReturnLoading, setIsReturnLoading] = useState(false);
@@ -61,6 +63,7 @@ export const BillsPage: React.FC = () => {
       const res = await api.getBills({
         businessDate: selectedDate || undefined,
         status: selectedStatus || undefined,
+        paymentMethod: selectedPaymentMethod || undefined,
         search: searchQuery.trim() || undefined,
         categoryId: selectedCategory ? Number(selectedCategory) : undefined,
         page: 1,
@@ -79,7 +82,7 @@ export const BillsPage: React.FC = () => {
       loadBills();
     }, searchQuery ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [selectedDate, selectedStatus, selectedCategory, searchQuery]);
+  }, [selectedDate, selectedStatus, selectedPaymentMethod, selectedCategory, searchQuery]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,24 +131,19 @@ export const BillsPage: React.FC = () => {
     setReturningBill(bill);
     setReturnReason('');
     setReturnItems([]);
+    setReturningBillDetail(null);
     setIsReturnLoading(true);
     setIsReturnOpen(true);
 
     try {
       const detail = await api.getBillDetail(bill.id);
+      setReturningBillDetail(detail);
 
-      // Only initialize return items that have remaining quantity > 0
-      const activeItems = detail.items.filter((item) => item.quantity > 0);
-      if (activeItems.length === 0) {
-        toast.error('All items from this bill have already been returned');
-        setIsReturnOpen(false);
-        return;
-      }
-
-      const items: ReturnItemState[] = activeItems.map((item) => ({
+      // Initialize return state for ALL product items in the bill (Task 1)
+      const items: ReturnItemState[] = detail.items.map((item) => ({
         billItem: item,
-        selected: false,
-        returnQty: item.quantity, // Default return qty = available remaining quantity
+        selected: item.quantity > 0, // default selected if active qty available
+        returnQty: item.quantity, // default return qty = available remaining quantity
       }));
       setReturnItems(items);
     } catch (err) {
@@ -158,19 +156,43 @@ export const BillsPage: React.FC = () => {
 
   const toggleReturnItem = (index: number) => {
     setReturnItems((prev) =>
-      prev.map((item, i) =>
-        i === index ? { ...item, selected: !item.selected } : item
-      )
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        const newSelected = !item.selected;
+        return {
+          ...item,
+          selected: newSelected,
+          returnQty: newSelected
+            ? item.returnQty > 0
+              ? item.returnQty
+              : item.billItem.quantity
+            : 0,
+        };
+      })
     );
   };
 
   const updateReturnQty = (index: number, qty: number) => {
     setReturnItems((prev) =>
-      prev.map((item, i) =>
-        i === index
-          ? { ...item, returnQty: Math.min(Math.max(1, qty), item.billItem.quantity) }
-          : item
-      )
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        const clampedQty = Math.max(0, Math.min(qty, item.billItem.quantity));
+        return {
+          ...item,
+          returnQty: clampedQty,
+          selected: clampedQty > 0,
+        };
+      })
+    );
+  };
+
+  const toggleSelectAll = (selectAll: boolean) => {
+    setReturnItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        selected: selectAll && item.billItem.quantity > 0,
+        returnQty: selectAll ? item.billItem.quantity : 0,
+      }))
     );
   };
 
@@ -217,20 +239,20 @@ export const BillsPage: React.FC = () => {
     return Math.min(refund, returningBill.grand_total_paise || 0);
   }, [returnItems, returningBill]);
 
-  const selectedReturnCount = returnItems.filter((item) => item.selected).length;
+  const selectedReturnCount = returnItems.filter((item) => item.selected && item.returnQty > 0).length;
 
   const isAllItemsReturned =
     returningBill !== null &&
     selectedReturnCount > 0 &&
     (returnRefundTotal >= (returningBill.grand_total_paise || 0) ||
       (returnItems.length > 0 &&
-        returnItems.every((item) => item.selected && item.returnQty >= item.billItem.quantity)));
+        returnItems.every((item) => (item.selected && item.returnQty >= item.billItem.quantity) || item.billItem.quantity === 0)));
 
   const handleConfirmReturn = async () => {
     if (!user?.id || !returningBill) return;
 
     if (selectedReturnCount === 0) {
-      toast.error('Please select at least one item to return');
+      toast.error('Please select at least one item and enter a return quantity > 0');
       return;
     }
 
@@ -240,7 +262,7 @@ export const BillsPage: React.FC = () => {
     }
 
     const returnItemsList: ReturnBillItem[] = returnItems
-      .filter((item) => item.selected)
+      .filter((item) => item.selected && item.returnQty > 0)
       .map((item) => ({
         bill_item_id: item.billItem.id,
         product_id: item.billItem.product_id,
@@ -360,6 +382,20 @@ export const BillsPage: React.FC = () => {
             />
 
             <CustomSelect
+              value={selectedPaymentMethod}
+              onChange={setSelectedPaymentMethod}
+              options={[
+                { value: '', label: 'All Payments' },
+                { value: 'cash', label: 'Cash' },
+                { value: 'upi', label: 'UPI / QR' },
+                { value: 'card', label: 'Card' },
+                { value: 'upi_cash', label: 'Split (UPI + Cash)' },
+              ]}
+              size="md"
+              buttonClassName="w-36 h-9 text-xs font-medium rounded-lg"
+            />
+
+            <CustomSelect
               value={selectedCategory}
               onChange={setSelectedCategory}
               options={[
@@ -370,12 +406,13 @@ export const BillsPage: React.FC = () => {
               buttonClassName="w-36 h-9 text-xs font-medium rounded-lg"
             />
 
-            {(selectedDate || selectedStatus || selectedCategory || searchQuery) && (
+            {(selectedDate || selectedStatus || selectedPaymentMethod || selectedCategory || searchQuery) && (
               <button
                 type="button"
                 onClick={() => {
                   setSelectedDate('');
                   setSelectedStatus('');
+                  setSelectedPaymentMethod('');
                   setSelectedCategory('');
                   setSearchQuery('');
                 }}
@@ -395,16 +432,16 @@ export const BillsPage: React.FC = () => {
             <table className="table w-full">
               <thead>
                 <tr>
-                  <th className="w-32">Bill #</th>
-                  <th className="w-44">Date & Time</th>
-                  <th className="w-36">Staff</th>
-                  <th className="w-28 text-center">Payment</th>
-                  <th className="w-28 text-right">Subtotal</th>
-                  <th className="w-24 text-right">Discount</th>
-                  <th className="w-28 text-right">GST Amount</th>
-                  <th className="w-32 text-right">Grand Total</th>
-                  <th className="w-28 text-center">Status</th>
-                  <th className="w-40 text-right">Actions</th>
+                  <th className="w-28 text-left whitespace-nowrap">Bill #</th>
+                  <th className="w-40 text-left whitespace-nowrap">Date & Time</th>
+                  <th className="w-32 text-left whitespace-nowrap">Staff</th>
+                  <th className="w-28 text-center whitespace-nowrap">Payment</th>
+                  <th className="w-28 text-right whitespace-nowrap">Subtotal</th>
+                  <th className="w-24 text-right whitespace-nowrap">Discount</th>
+                  <th className="w-28 text-right whitespace-nowrap">GST Amount</th>
+                  <th className="w-32 text-right whitespace-nowrap">Grand Total</th>
+                  <th className="w-28 text-center whitespace-nowrap">Status</th>
+                  <th className="w-32 text-right whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -433,42 +470,42 @@ export const BillsPage: React.FC = () => {
                           : ''
                       }
                     >
-                      <td className="font-mono font-bold text-primary-700">
-                        #{b.bill_number}
+                      <td className="font-mono font-bold text-primary-700 whitespace-nowrap">
+                        Bill: {String(b.bill_number).padStart(5, '0')}
                       </td>
-                      <td className="text-surface-700 font-mono">
+                      <td className="text-surface-700 font-mono text-xs whitespace-nowrap">
                         {formatDateDMY(b.business_date)} {b.bill_time}
                       </td>
-                      <td className="font-medium text-surface-800">
+                      <td className="font-medium text-surface-800 whitespace-nowrap">
                         {b.user_name || 'Staff'}
                       </td>
-                      <td>
-                        <span className="badge badge-neutral uppercase font-mono">
-                          {b.payment_method || 'Cash'}
+                      <td className="text-center whitespace-nowrap">
+                        <span className="badge badge-neutral font-semibold text-2xs">
+                          {formatPaymentMethod(b.payment_method)}
                         </span>
                       </td>
-                      <td className="font-mono text-surface-600">
+                      <td className="font-mono text-surface-600 text-right whitespace-nowrap">
                         {formatCurrency(b.subtotal_paise)}
                       </td>
-                      <td className="font-mono text-red-600">
+                      <td className="font-mono text-red-600 text-right whitespace-nowrap">
                         {b.discount_amount_paise > 0
                           ? `-${formatCurrency(b.discount_amount_paise)}`
                           : '₹0.00'}
                       </td>
-                      <td className="font-mono text-right">
+                      <td className="font-mono text-right whitespace-nowrap">
                         {b.gst_total_paise > 0 ? (
                           <span className="text-surface-700 font-semibold">{formatCurrency(b.gst_total_paise)}</span>
                         ) : (
                           <span className="text-surface-400">—</span>
                         )}
                       </td>
-                      <td className="font-mono font-bold text-surface-900">
+                      <td className="font-mono font-bold text-surface-900 text-right whitespace-nowrap">
                         {formatCurrency(b.grand_total_paise)}
                       </td>
-                      <td>
+                      <td className="text-center whitespace-nowrap">
                         {getStatusBadge(b.status, b.void_reason)}
                       </td>
-                      <td className="text-right">
+                      <td className="text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1">
                           {/* View Details — always visible */}
                           <button
@@ -480,23 +517,24 @@ export const BillsPage: React.FC = () => {
                             <Eye className="w-4 h-4" />
                           </button>
 
-                          {/* Return Button — available on completed and returned bills for Admin & Staff */}
-                          {(b.status === 'completed' || b.status === 'returned') ? (
+                          {/* Return Button — available on completed, returned, and cancelled bills */}
+                          {(b.status === 'completed' || b.status === 'returned' || b.status === 'cancelled') ? (
                             <button
                               type="button"
                               onClick={() => handleOpenReturn(b)}
-                              className="p-1.5 text-surface-500 hover:text-amber-600 rounded hover:bg-amber-50 transition-colors cursor-pointer"
-                              title="Return / Refund items from this bill"
+                              className={`p-1.5 rounded transition-colors cursor-pointer ${
+                                b.status === 'cancelled'
+                                  ? 'text-surface-400 hover:text-amber-600 hover:bg-amber-50'
+                                  : 'text-surface-500 hover:text-amber-600 hover:bg-amber-50'
+                              }`}
+                              title={
+                                b.status === 'cancelled'
+                                  ? 'View Returned Items & Quantities'
+                                  : 'Return / Refund items from this bill'
+                              }
                             >
                               <RotateCcw className="w-4 h-4" />
                             </button>
-                          ) : b.status === 'cancelled' ? (
-                            <span
-                              className="p-1.5 text-surface-300 cursor-not-allowed"
-                              title="All items returned — Bill Cancelled"
-                            >
-                              <RotateCcw className="w-4 h-4 opacity-40" />
-                            </span>
                           ) : null}
 
                           {/* Void Button — strictly requires Admin authorization */}
@@ -538,16 +576,16 @@ export const BillsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Bill Details Modal */}
+      {/* Bill Details Modal — Full Landscape Width */}
       <Modal
         isOpen={isDetailOpen}
         onClose={() => setIsDetailOpen(false)}
         title={
           selectedBillDetail
-            ? `Bill #${selectedBillDetail.bill.bill_number} Details`
+            ? `Bill: ${String(selectedBillDetail.bill.bill_number).padStart(5, '0')} Details`
             : 'Loading Bill...'
         }
-        maxWidth="lg"
+        maxWidth="5xl"
         closeOnBackdropClick={false}
         footer={
           selectedBillDetail && (
@@ -596,36 +634,146 @@ export const BillsPage: React.FC = () => {
               </div>
               <div>
                 <span className="text-surface-500 block">Payment Method:</span>
-                <span className="font-semibold uppercase text-primary-700">
-                  {selectedBillDetail.payment.payment_method}
+                <span className="font-semibold text-primary-700">
+                  {formatPaymentMethod(selectedBillDetail.payment.payment_method)}
                 </span>
               </div>
             </div>
 
+            {/* Returned Items Section in Bill Detail (Task 2 & 4: show returned product name and returned qty) */}
+            {((selectedBillDetail.returned_items && selectedBillDetail.returned_items.length > 0) ||
+              selectedBillDetail.items.some((it) => (it.returned_quantity && it.returned_quantity > 0) || it.quantity === 0) ||
+              selectedBillDetail.bill.status === 'returned' ||
+              selectedBillDetail.bill.status === 'cancelled') && (
+              <div className="space-y-2 p-3 bg-amber-50/70 rounded-xl border border-amber-200 text-xs">
+                <div className="flex items-center gap-2 text-amber-900 font-bold uppercase tracking-wide">
+                  <RotateCcw className="w-4 h-4 text-amber-700" />
+                  <span>Returned Products & Quantities</span>
+                  <span className="ml-auto text-2xs font-mono font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+                    {selectedBillDetail.returned_items && selectedBillDetail.returned_items.length > 0
+                      ? `${selectedBillDetail.returned_items.length} ${selectedBillDetail.returned_items.length === 1 ? 'Product Returned' : 'Products Returned'}`
+                      : 'Returns Processed'}
+                  </span>
+                </div>
+
+                <div className="border border-amber-200 rounded-lg overflow-hidden bg-white shadow-2xs">
+                  <table className="table w-full text-xs">
+                    <thead className="bg-amber-100/60 text-amber-950 font-bold">
+                      <tr>
+                        <th className="py-2 text-left">Returned Product</th>
+                        <th className="py-2 text-center w-28">Returned Qty</th>
+                        <th className="py-2 text-right w-28">Unit Price</th>
+                        <th className="py-2 text-right w-28">Refund Amount</th>
+                        <th className="py-2 text-left w-36">Return Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-amber-100">
+                      {selectedBillDetail.returned_items && selectedBillDetail.returned_items.length > 0 ? (
+                        selectedBillDetail.returned_items.map((ret, idx) => (
+                          <tr key={ret.id || idx} className="hover:bg-amber-50/40">
+                            <td className="font-semibold text-surface-900 whitespace-nowrap">
+                              <span className="font-bold">{ret.product_name}</span>
+                              {ret.product_code && (
+                                <span className="text-3xs text-surface-400 font-mono ml-1.5">({ret.product_code})</span>
+                              )}
+                            </td>
+                            <td className="text-center font-mono">
+                              <span className="inline-flex items-center font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                {ret.quantity} {ret.quantity === 1 ? 'Unit' : 'Units'}
+                              </span>
+                            </td>
+                            <td className="text-right font-mono text-surface-700">
+                              {formatCurrency(ret.unit_price_paise)}
+                            </td>
+                            <td className="text-right font-mono font-bold text-red-600">
+                              -{formatCurrency(ret.line_total_paise || ret.unit_price_paise * ret.quantity)}
+                            </td>
+                            <td className="text-surface-700 text-2xs italic whitespace-nowrap">
+                              <span>"{ret.reason || 'Customer Return'}"</span>
+                              {ret.returned_at && (
+                                <span className="text-3xs text-surface-400 not-italic font-mono ml-1.5">
+                                  [{ret.returned_at}]
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        selectedBillDetail.items
+                          .filter((it) => (it.returned_quantity && it.returned_quantity > 0) || it.quantity === 0)
+                          .map((it) => {
+                            const retQty = it.returned_quantity || 1;
+                            const refund = it.unit_price_paise * retQty;
+                            return (
+                              <tr key={it.id} className="hover:bg-amber-50/40">
+                                <td className="font-semibold text-surface-900 whitespace-nowrap">
+                                  <span className="font-bold">{it.product_name_snapshot || (it as any).product_name || 'Item'}</span>
+                                  <span className="text-3xs text-surface-400 font-mono ml-1.5">
+                                    ({it.product_code_snapshot || 'N/A'})
+                                  </span>
+                                </td>
+                                <td className="text-center font-mono">
+                                  <span className="inline-flex items-center font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                    {retQty} {retQty === 1 ? 'Unit' : 'Units'}
+                                  </span>
+                                </td>
+                                <td className="text-right font-mono text-surface-700">
+                                  {formatCurrency(it.unit_price_paise)}
+                                </td>
+                                <td className="text-right font-mono font-bold text-red-600">
+                                  -{formatCurrency(refund)}
+                                </td>
+                                <td className="text-surface-700 text-2xs italic whitespace-nowrap">
+                                  "{selectedBillDetail.bill.void_reason || 'Customer Return'}"
+                                </td>
+                              </tr>
+                            );
+                          })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Items Snapshot Table */}
             <div>
-              <div className="text-sm font-bold text-surface-700 uppercase tracking-wide mb-1.5">
-                Purchased Items (Historical Snapshots)
+              <div className="text-sm font-bold text-surface-700 uppercase tracking-wide mb-1.5 flex items-center justify-between">
+                <span>Purchased Items (Active / Current)</span>
+                <span className="text-3xs text-surface-400 lowercase font-normal">active bill line items</span>
               </div>
               <div className="border border-surface-200 rounded overflow-hidden">
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Product</th>
-                      <th>Category</th>
-                      <th className="text-right">Unit Price</th>
-                      <th className="text-center">Qty</th>
-                      <th className="text-right">Line Total</th>
+                      <th className="whitespace-nowrap">Product</th>
+                      <th className="whitespace-nowrap">Category</th>
+                      <th className="text-right whitespace-nowrap">Unit Price</th>
+                      <th className="text-center whitespace-nowrap">Active Qty</th>
+                      <th className="text-right whitespace-nowrap">Line Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selectedBillDetail.items.map((it) => (
                       <tr key={it.id}>
-                        <td className="font-medium text-surface-900">
-                          {it.product_name_snapshot}
-                          <span className="text-xs text-surface-400 block font-mono">
-                            {it.product_code_snapshot}
-                          </span>
+                        <td className="font-medium text-surface-900 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-surface-950">
+                              {it.product_name_snapshot || (it as any).product_name || (it as any).name || 'Item'}
+                            </span>
+                            <span className="text-xs text-surface-400 font-mono">
+                              ({it.product_code_snapshot || (it as any).product_code || (it as any).code || 'N/A'})
+                            </span>
+                            {(it.returned_quantity && it.returned_quantity > 0) ? (
+                              <span className="inline-flex text-3xs font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                {it.returned_quantity} Returned
+                              </span>
+                            ) : it.quantity === 0 ? (
+                              <span className="inline-flex text-3xs font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-800 border border-red-300">
+                                Fully Returned
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="text-surface-500">
                           {it.category_name_snapshot}
@@ -722,6 +870,8 @@ export const BillsPage: React.FC = () => {
             gstTotalPaise: selectedBillDetail.bill.gst_total_paise,
             grandTotalPaise: selectedBillDetail.bill.grand_total_paise,
             paymentMethod: selectedBillDetail.payment?.payment_method || selectedBillDetail.bill.payment_method || 'cash',
+            cashAmountPaise: selectedBillDetail.payment?.cash_amount_paise,
+            upiAmountPaise: selectedBillDetail.payment?.upi_amount_paise,
             tenderedCashPaise: selectedBillDetail.payment?.cash_amount_paise,
             changeDuePaise: (selectedBillDetail.payment?.cash_amount_paise || 0) > selectedBillDetail.bill.grand_total_paise
               ? (selectedBillDetail.payment?.cash_amount_paise || 0) - selectedBillDetail.bill.grand_total_paise
@@ -730,16 +880,16 @@ export const BillsPage: React.FC = () => {
         />
       )}
 
-      {/* Return / Refund Modal */}
+      {/* Return / Refund Modal — Big Landscape Width */}
       <Modal
         isOpen={isReturnOpen}
         onClose={() => setIsReturnOpen(false)}
         title={
           returningBill
-            ? `Return Items — Bill #${returningBill.bill_number}`
+            ? `Return Items — Bill: ${String(returningBill.bill_number).padStart(5, '0')}`
             : 'Process Return'
         }
-        maxWidth="lg"
+        maxWidth="5xl"
         closeOnBackdropClick={false}
         footer={
           <div className="flex items-center justify-between w-full">
@@ -789,101 +939,277 @@ export const BillsPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Instructions */}
-            <p className="text-sm text-surface-500">
-              Select the items you want to return and adjust the return quantity if needed. The refund amount will be calculated automatically.
-            </p>
+            {/* Task 2: Already Returned Products Section (if any return was already done) */}
+            {((returningBillDetail?.returned_items && returningBillDetail.returned_items.length > 0) ||
+              returningBillDetail?.items.some((it) => (it.returned_quantity && it.returned_quantity > 0) || it.quantity === 0) ||
+              returningBill?.status === 'returned' ||
+              returningBill?.status === 'cancelled') && (
+              <div className="space-y-2 p-3 bg-amber-50/70 rounded-xl border border-amber-200 text-xs">
+                <div className="flex items-center gap-2 text-amber-900 font-bold uppercase tracking-wide">
+                  <RotateCcw className="w-4 h-4 text-amber-700" />
+                  <span>Already Returned Products & Quantities</span>
+                  <span className="ml-auto text-2xs font-mono font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
+                    {returningBillDetail?.returned_items && returningBillDetail.returned_items.length > 0
+                      ? `${returningBillDetail.returned_items.length} ${returningBillDetail.returned_items.length === 1 ? 'Product Returned' : 'Products Returned'}`
+                      : 'Previously Returned'}
+                  </span>
+                </div>
 
-            {/* Return Items Table */}
-            <div className="border border-surface-200 rounded-lg overflow-hidden">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th className="w-12 text-center">Select</th>
-                    <th>Product</th>
-                    <th className="text-right w-32">Unit Price</th>
-                    <th className="text-center w-24">Original Qty</th>
-                    <th className="text-center w-28">Return Qty</th>
-                    <th className="text-right w-36">Line Refund</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {returnItems.map((item, index) => {
-                    const itemBase = item.billItem.unit_price_paise * item.returnQty;
-                    const itemGst =
-                      gstEnabled && item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0
-                        ? Math.round((itemBase * item.billItem.gst_percentage_x100) / 10000)
-                        : 0;
-                    const lineRefund = itemBase + itemGst;
-
-                    return (
-                      <tr
-                        key={item.billItem.id}
-                        className={item.selected ? 'bg-amber-50/50' : ''}
-                      >
-                        <td className="text-center">
-                          <input
-                            type="checkbox"
-                            checked={item.selected}
-                            onChange={() => toggleReturnItem(index)}
-                            className="form-checkbox"
-                          />
-                        </td>
-                        <td className="font-medium text-surface-900">
-                          {item.billItem.product_name_snapshot}
-                          <span className="text-xs text-surface-400 block font-mono">
-                            {item.billItem.product_code_snapshot}
-                          </span>
-                        </td>
-                        <td className="text-right font-mono">
-                          <div>{formatCurrency(item.billItem.unit_price_paise)}</div>
-                          {gstEnabled && item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0 ? (
-                            <span className="inline-block text-2xs text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
-                              +{(item.billItem.gst_percentage_x100 / 100).toFixed(0)}% GST
-                            </span>
-                          ) : null}
-                        </td>
-                        <td className="text-center font-mono font-bold">
-                          {item.billItem.quantity}
-                        </td>
-                        <td className="text-center">
-                          {item.selected ? (
-                            <input
-                              type="number"
-                              min="1"
-                              max={item.billItem.quantity}
-                              value={item.returnQty}
-                              onChange={(e) =>
-                                updateReturnQty(index, parseInt(e.target.value) || 1)
-                              }
-                              className="w-16 h-8 text-center text-sm border border-surface-300 rounded bg-white font-mono font-bold mx-auto"
-                            />
-                          ) : (
-                            <span className="text-surface-400">—</span>
-                          )}
-                        </td>
-                        <td className="text-right font-mono font-bold">
-                          {item.selected ? (
-                            <div>
-                              <span className="text-red-600">
-                                -{formatCurrency(lineRefund)}
+                <div className="border border-amber-200 rounded-lg overflow-hidden bg-white shadow-2xs">
+                  <table className="table w-full text-xs">
+                    <thead className="bg-amber-100/60 text-amber-950 font-bold">
+                      <tr>
+                        <th className="py-2 text-left whitespace-nowrap">Returned Product</th>
+                        <th className="py-2 text-center w-28 whitespace-nowrap">Returned Qty</th>
+                        <th className="py-2 text-right w-28 whitespace-nowrap">Unit Price</th>
+                        <th className="py-2 text-right w-28 whitespace-nowrap">Refund Amount</th>
+                        <th className="py-2 text-left w-48 whitespace-nowrap">Return Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-amber-100">
+                      {returningBillDetail?.returned_items && returningBillDetail.returned_items.length > 0 ? (
+                        returningBillDetail.returned_items.map((ret, idx) => (
+                          <tr key={ret.id || idx} className="hover:bg-amber-50/40">
+                            <td className="font-semibold text-surface-900 whitespace-nowrap">
+                              <span className="font-bold">{ret.product_name}</span>
+                              {ret.product_code && (
+                                <span className="text-3xs text-surface-400 font-mono ml-1.5">({ret.product_code})</span>
+                              )}
+                            </td>
+                            <td className="text-center font-mono">
+                              <span className="inline-flex items-center font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                {ret.quantity} {ret.quantity === 1 ? 'Unit' : 'Units'}
                               </span>
-                              {itemGst > 0 && (
-                                <span className="text-2xs text-surface-400 block font-normal">
-                                  incl. {formatCurrency(itemGst)} GST
+                            </td>
+                            <td className="text-right font-mono text-surface-700">
+                              {formatCurrency(ret.unit_price_paise)}
+                            </td>
+                            <td className="text-right font-mono font-bold text-red-600">
+                              -{formatCurrency(ret.line_total_paise || ret.unit_price_paise * ret.quantity)}
+                            </td>
+                            <td className="text-surface-700 text-2xs italic whitespace-nowrap">
+                              <span>"{ret.reason || 'Customer Return'}"</span>
+                              {ret.returned_at && (
+                                <span className="text-3xs text-surface-400 not-italic font-mono ml-1.5">
+                                  [{ret.returned_at}]
                                 </span>
                               )}
-                            </div>
-                          ) : (
-                            <span className="text-surface-400">—</span>
-                          )}
-                        </td>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        returningBillDetail?.items
+                          .filter((it) => (it.returned_quantity && it.returned_quantity > 0) || it.quantity === 0)
+                          .map((it) => {
+                            const retQty = it.returned_quantity || 1;
+                            const refund = it.unit_price_paise * retQty;
+                            return (
+                              <tr key={it.id} className="hover:bg-amber-50/40">
+                                <td className="font-semibold text-surface-900 whitespace-nowrap">
+                                  <span className="font-bold">{it.product_name_snapshot || (it as any).product_name || 'Item'}</span>
+                                  <span className="text-3xs text-surface-400 font-mono ml-1.5">
+                                    ({it.product_code_snapshot || 'N/A'})
+                                  </span>
+                                </td>
+                                <td className="text-center font-mono">
+                                  <span className="inline-flex items-center font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                    {retQty} {retQty === 1 ? 'Unit' : 'Units'}
+                                  </span>
+                                </td>
+                                <td className="text-right font-mono text-surface-700">
+                                  {formatCurrency(it.unit_price_paise)}
+                                </td>
+                                <td className="text-right font-mono font-bold text-red-600">
+                                  -{formatCurrency(refund)}
+                                </td>
+                                <td className="text-surface-700 text-2xs italic whitespace-nowrap">
+                                  "{returningBill?.void_reason || 'Customer Return'}"
+                                </td>
+                              </tr>
+                            );
+                          })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Check if all items in bill have already been returned */}
+            {returnItems.length > 0 && returnItems.every((item) => item.billItem.quantity === 0) ? (
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-1.5">
+                <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+                <h4 className="font-bold text-surface-900 text-sm">All Items Already Returned</h4>
+                <p className="text-xs text-surface-500">
+                  Every product item from Bill #{returningBill?.bill_number} has already been returned and refunded. The bill status is Cancelled.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Instructions & Quick Actions */}
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-xs text-surface-500">
+                    Select the items you want to return and specify the return quantity. The refund amount will be calculated automatically.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleSelectAll(true)}
+                      className="text-2xs font-semibold text-primary-700 bg-primary-50 hover:bg-primary-100 px-2.5 py-1 rounded border border-primary-200 transition-colors cursor-pointer"
+                    >
+                      Return All Items
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleSelectAll(false)}
+                      className="text-2xs font-semibold text-surface-600 bg-surface-100 hover:bg-surface-200 px-2.5 py-1 rounded border border-surface-200 transition-colors cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                </div>
+
+                {/* Return Items Table (Clean, Proper Old-Version Return Flow) */}
+                <div className="border border-surface-200 rounded-lg overflow-hidden">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th className="w-12 text-center whitespace-nowrap">
+                          <input
+                            type="checkbox"
+                            checked={
+                              returnItems.length > 0 &&
+                              returnItems
+                                .filter((item) => item.billItem.quantity > 0)
+                                .every((item) => item.selected && item.returnQty > 0)
+                            }
+                            onChange={(e) => toggleSelectAll(e.target.checked)}
+                            className="form-checkbox"
+                            title="Select / Deselect All Available Items"
+                          />
+                        </th>
+                        <th className="whitespace-nowrap">Product</th>
+                        <th className="text-right w-28 whitespace-nowrap">Unit Price</th>
+                        <th className="text-center w-24 whitespace-nowrap">Available</th>
+                        <th className="text-center w-44 whitespace-nowrap">Return Qty</th>
+                        <th className="text-right w-32 whitespace-nowrap">Refund</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {returnItems.map((item, index) => {
+                        const itemBase = item.billItem.unit_price_paise * item.returnQty;
+                        const itemGst =
+                          gstEnabled && item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0
+                            ? Math.round((itemBase * item.billItem.gst_percentage_x100) / 10000)
+                            : 0;
+                        const lineRefund = itemBase + itemGst;
+                        const isAvailable = item.billItem.quantity > 0;
+
+                        return (
+                          <tr
+                            key={item.billItem.id}
+                            className={item.selected ? 'bg-amber-50/50' : !isAvailable ? 'opacity-50 bg-surface-50/50' : ''}
+                          >
+                            <td className="text-center">
+                              {isAvailable ? (
+                                <input
+                                  type="checkbox"
+                                  checked={item.selected}
+                                  onChange={() => toggleReturnItem(index)}
+                                  className="form-checkbox cursor-pointer"
+                                />
+                              ) : (
+                                <span className="text-3xs text-surface-400 font-mono">—</span>
+                              )}
+                            </td>
+                            <td className="font-medium text-surface-900 whitespace-nowrap">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-surface-950">
+                                  {item.billItem.product_name_snapshot || (item.billItem as any).product_name || (item.billItem as any).name || 'Item'}
+                                </span>
+                                <span className="text-xs text-surface-400 font-mono">
+                                  ({item.billItem.product_code_snapshot || (item.billItem as any).product_code || (item.billItem as any).code || 'N/A'})
+                                </span>
+                                {!isAvailable && (
+                                  <span className="inline-flex text-3xs font-semibold px-1.5 py-0.5 rounded bg-red-100 text-red-800 border border-red-300">
+                                    Already Fully Returned
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="text-right font-mono whitespace-nowrap">
+                              <div>{formatCurrency(item.billItem.unit_price_paise)}</div>
+                              {gstEnabled && item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0 ? (
+                                <span className="inline-block text-2xs text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
+                                  +{(item.billItem.gst_percentage_x100 / 100).toFixed(0)}% GST
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="text-center font-mono font-bold whitespace-nowrap">
+                              {item.billItem.quantity}
+                              {(item.billItem.returned_quantity && item.billItem.returned_quantity > 0) ? (
+                                <span className="text-3xs text-amber-700 block font-normal">
+                                  ({item.billItem.returned_quantity} prev. returned)
+                                </span>
+                              ) : null}
+                            </td>
+                            {/* Return Qty Option — Clean Old-Version Style */}
+                            <td className="text-center whitespace-nowrap">
+                              {isAvailable ? (
+                                item.selected ? (
+                                  <div className="inline-flex items-center gap-1.5 justify-center">
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max={item.billItem.quantity}
+                                      value={item.returnQty}
+                                      onChange={(e) =>
+                                        updateReturnQty(index, parseInt(e.target.value) || 1)
+                                      }
+                                      className="w-18 h-8 text-center text-sm border-2 border-amber-400 rounded-lg bg-white font-mono font-bold focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                                    />
+                                    {item.billItem.quantity > 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => updateReturnQty(index, item.billItem.quantity)}
+                                        className="text-3xs px-2 py-1.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 font-bold transition-colors cursor-pointer"
+                                        title="Return all units of this product"
+                                      >
+                                        All
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-surface-400 font-mono text-sm">—</span>
+                                )
+                              ) : (
+                                <span className="text-surface-400 text-xs italic">0 available</span>
+                              )}
+                            </td>
+                            <td className="text-right font-mono font-bold whitespace-nowrap">
+                              {item.selected && item.returnQty > 0 ? (
+                                <div>
+                                  <span className="text-red-600">
+                                    -{formatCurrency(lineRefund)}
+                                  </span>
+                                  {itemGst > 0 && (
+                                    <span className="text-2xs text-surface-400 block font-normal">
+                                      incl. {formatCurrency(itemGst)} GST
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-surface-400 font-mono text-sm">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
 
             {/* Return Reason with Quick Presets */}
             <div className="form-group space-y-1.5">
@@ -956,7 +1282,7 @@ export const BillsPage: React.FC = () => {
       <Modal
         isOpen={isVoidOpen}
         onClose={() => setIsVoidOpen(false)}
-        title={voidingBill ? `Void Bill #${voidingBill.bill_number}` : 'Void Bill'}
+        title={voidingBill ? `Void Bill: ${String(voidingBill.bill_number).padStart(5, '0')}` : 'Void Bill'}
         maxWidth="md"
         closeOnBackdropClick={false}
         footer={

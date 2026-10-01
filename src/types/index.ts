@@ -131,12 +131,32 @@ export interface BillItem {
   product_code_snapshot: string;
   product_name_snapshot: string;
   category_name_snapshot: string;
+  product_name?: string;
+  name?: string;
+  product_code?: string;
+  category_name?: string;
   unit_price_paise: number;
   quantity: number;
   gst_enabled: boolean;
   gst_percentage_x100: number;
   gst_amount_paise: number;
   line_total_paise: number;
+  returned_quantity?: number;
+}
+
+export interface ReturnedBillItemRecord {
+  id: number;
+  bill_id: number;
+  bill_item_id: number;
+  product_id: number | null;
+  product_name: string;
+  product_code: string;
+  quantity: number;
+  unit_price_paise: number;
+  line_total_paise: number;
+  reason: string;
+  returned_at: string;
+  returned_by_name?: string;
 }
 
 export interface Payment {
@@ -154,6 +174,7 @@ export interface BillDetail {
   bill: Bill;
   items: BillItem[];
   payment: Payment;
+  returned_items?: ReturnedBillItemRecord[];
 }
 
 export interface CompleteBillResponse {

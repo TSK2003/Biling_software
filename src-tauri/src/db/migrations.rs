@@ -53,6 +53,9 @@ pub fn run_migrations(db: &mut Database) -> Result<(), Box<dyn std::error::Error
     if current_version < 10 {
         apply_v10(db)?;
     }
+    if current_version < 11 {
+        apply_v11(db)?;
+    }
     
     Ok(())
 }
@@ -177,7 +180,7 @@ fn apply_v1(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
             product_name_snapshot   TEXT NOT NULL,
             category_name_snapshot  TEXT NOT NULL,
             unit_price_paise        INTEGER NOT NULL CHECK (unit_price_paise >= 0),
-            quantity                INTEGER NOT NULL CHECK (quantity > 0),
+            quantity                INTEGER NOT NULL CHECK (quantity >= 0),
             gst_enabled             INTEGER NOT NULL DEFAULT 0,
             gst_percentage_x100     INTEGER NOT NULL DEFAULT 0,
             gst_amount_paise        INTEGER NOT NULL DEFAULT 0 CHECK (gst_amount_paise >= 0),
@@ -963,6 +966,107 @@ fn apply_v10(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
     tx.commit()?;
 
     log::info!("Database migration v10 (Restockable products & buying price) applied successfully");
+    Ok(())
+}
+
+/// Version 11: Add returned_quantity to bill_items, create bill_returns and bill_return_items tables
+fn apply_v11(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
+    let tx = db.conn.transaction()?;
+
+    // 1. Rebuild bill_items table to allow quantity >= 0 and add returned_quantity column
+    tx.execute_batch("
+        PRAGMA foreign_keys = OFF;
+
+        CREATE TABLE IF NOT EXISTS bill_items_v11 (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            bill_id                 INTEGER NOT NULL,
+            product_id              INTEGER,
+            product_code_snapshot   TEXT NOT NULL,
+            product_name_snapshot   TEXT NOT NULL,
+            category_name_snapshot  TEXT NOT NULL,
+            unit_price_paise        INTEGER NOT NULL CHECK (unit_price_paise >= 0),
+            quantity                INTEGER NOT NULL CHECK (quantity >= 0),
+            gst_enabled             INTEGER NOT NULL DEFAULT 0,
+            gst_percentage_x100     INTEGER NOT NULL DEFAULT 0,
+            gst_amount_paise        INTEGER NOT NULL DEFAULT 0 CHECK (gst_amount_paise >= 0),
+            line_total_paise        INTEGER NOT NULL CHECK (line_total_paise >= 0),
+            sort_order              INTEGER NOT NULL DEFAULT 0,
+            returned_quantity       INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+        );
+
+        INSERT INTO bill_items_v11 (
+            id, bill_id, product_id, product_code_snapshot, product_name_snapshot,
+            category_name_snapshot, unit_price_paise, quantity, gst_enabled,
+            gst_percentage_x100, gst_amount_paise, line_total_paise, sort_order, returned_quantity
+        )
+        SELECT 
+            id, bill_id, product_id, product_code_snapshot, product_name_snapshot,
+            category_name_snapshot, unit_price_paise, quantity, gst_enabled,
+            gst_percentage_x100, gst_amount_paise, line_total_paise, sort_order, 0
+        FROM bill_items;
+
+        DROP TABLE bill_items;
+        ALTER TABLE bill_items_v11 RENAME TO bill_items;
+
+        CREATE INDEX IF NOT EXISTS idx_bill_items_bill ON bill_items(bill_id);
+        CREATE INDEX IF NOT EXISTS idx_bill_items_product ON bill_items(product_id);
+
+        PRAGMA foreign_keys = ON;
+
+        CREATE TABLE IF NOT EXISTS bill_returns (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            bill_id             INTEGER NOT NULL,
+            user_id             INTEGER NOT NULL,
+            reason              TEXT NOT NULL,
+            refund_amount_paise INTEGER NOT NULL DEFAULT 0,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+        CREATE INDEX IF NOT EXISTS idx_bill_returns_bill ON bill_returns(bill_id);
+
+        CREATE TABLE IF NOT EXISTS bill_return_items (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            bill_return_id      INTEGER NOT NULL,
+            bill_id             INTEGER NOT NULL,
+            bill_item_id        INTEGER NOT NULL,
+            product_id          INTEGER,
+            product_name        TEXT NOT NULL,
+            product_code        TEXT NOT NULL DEFAULT '',
+            quantity            INTEGER NOT NULL,
+            unit_price_paise    INTEGER NOT NULL,
+            line_total_paise    INTEGER NOT NULL,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (bill_return_id) REFERENCES bill_returns(id) ON DELETE CASCADE,
+            FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_bill_return_items_bill ON bill_return_items(bill_id);
+    ")?;
+
+    // 2. Backfill returned_quantity for existing returned bills using stock_movements
+    let _ = tx.execute("
+        UPDATE bill_items
+        SET returned_quantity = (
+            SELECT COALESCE(SUM(sm.quantity_change), 0)
+            FROM stock_movements sm
+            WHERE sm.reference_id = bill_items.bill_id
+              AND sm.product_id = bill_items.product_id
+              AND sm.movement_type = 'return'
+        )
+        WHERE EXISTS (
+            SELECT 1 FROM stock_movements sm
+            WHERE sm.reference_id = bill_items.bill_id
+              AND sm.product_id = bill_items.product_id
+              AND sm.movement_type = 'return'
+        )
+    ", []);
+
+    tx.execute("INSERT INTO schema_version (version) VALUES (11)", [])?;
+    tx.commit()?;
+
+    log::info!("Database migration v11 (Return tracking tables & bill_items.returned_quantity) applied successfully");
     Ok(())
 }
 

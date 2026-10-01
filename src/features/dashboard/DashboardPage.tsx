@@ -12,7 +12,7 @@ import {
   TrendingDown,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
-import { formatCurrency, getTodayDateString, formatDateDMY } from '../../lib/format';
+import { formatCurrency, getTodayDateString, formatDateDMY, formatPaymentMethod } from '../../lib/format';
 import { Header } from '../../components/Header';
 import type { DashboardStats, Bill } from '../../types';
 import toast from 'react-hot-toast';
@@ -55,6 +55,69 @@ export const DashboardPage: React.FC = () => {
         subtitle="Live sales performance, payment channels, and transaction volume"
         actions={
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Quick Preset Range Selector */}
+            <div className="flex items-center bg-surface-100 p-0.5 rounded-lg border border-surface-200">
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom(todayStr);
+                  setDateTo(todayStr);
+                }}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+                  dateFrom === todayStr && dateTo === todayStr
+                    ? 'bg-white text-primary-700 shadow-xs'
+                    : 'text-surface-600 hover:text-surface-900'
+                }`}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date();
+                  const startOfWeek = new Date(now);
+                  const day = startOfWeek.getDay();
+                  const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+                  startOfWeek.setDate(diff);
+                  const fStr = `${startOfWeek.getFullYear()}-${String(startOfWeek.getMonth() + 1).padStart(2, '0')}-${String(startOfWeek.getDate()).padStart(2, '0')}`;
+                  setDateFrom(fStr);
+                  setDateTo(todayStr);
+                }}
+                className="px-2.5 py-1 text-xs font-semibold rounded-md transition-colors text-surface-600 hover:text-surface-900"
+              >
+                This Week
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const monthStart = `${todayStr.slice(0, 7)}-01`;
+                  setDateFrom(monthStart);
+                  setDateTo(todayStr);
+                }}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+                  dateFrom === `${todayStr.slice(0, 7)}-01` && dateTo === todayStr
+                    ? 'bg-white text-primary-700 shadow-xs'
+                    : 'text-surface-600 hover:text-surface-900'
+                }`}
+              >
+                This Month
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom('2020-01-01');
+                  setDateTo(todayStr);
+                }}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
+                  dateFrom === '2020-01-01'
+                    ? 'bg-white text-primary-700 shadow-xs'
+                    : 'text-surface-600 hover:text-surface-900'
+                }`}
+              >
+                All Time
+              </button>
+            </div>
+
             {/* Custom From - To Range Filter */}
             <div className="flex items-center gap-1.5 bg-white px-3 py-1 rounded-lg border border-surface-200 shadow-xs h-9">
               <Calendar className="w-3.5 h-3.5 text-primary-600 flex-shrink-0" />
@@ -284,24 +347,24 @@ export const DashboardPage: React.FC = () => {
                 ) : (
                   recentBills.map((b) => (
                     <tr key={b.id} className="hover:bg-surface-50 transition-colors">
-                      <td className="font-mono font-bold text-primary-700 text-sm">
-                        #{b.bill_number}
+                      <td className="font-mono font-bold text-primary-700 text-xs whitespace-nowrap">
+                        Bill: {String(b.bill_number).padStart(5, '0')}
                       </td>
-                      <td className="text-xs text-surface-700 font-mono font-medium">
+                      <td className="text-xs text-surface-700 font-mono font-medium whitespace-nowrap">
                         {formatDateDMY(b.business_date)} {b.bill_time}
                       </td>
-                      <td className="text-xs font-semibold text-surface-900">
+                      <td className="text-xs font-semibold text-surface-900 whitespace-nowrap truncate max-w-[140px]">
                         {b.user_name || 'Staff'}
                       </td>
-                      <td className="text-center">
-                        <span className="badge badge-neutral uppercase font-mono text-2xs font-bold px-2 py-0.5">
-                          {b.payment_method?.replace('_', ' + ') || 'Cash'}
+                      <td className="text-center whitespace-nowrap">
+                        <span className="badge badge-neutral text-2xs font-semibold">
+                          {formatPaymentMethod(b.payment_method)}
                         </span>
                       </td>
-                      <td className="text-right font-mono text-xs font-semibold text-surface-700">
+                      <td className="text-right font-mono text-xs font-semibold text-surface-700 whitespace-nowrap">
                         {formatCurrency(b.subtotal_paise)}
                       </td>
-                      <td className="text-right font-mono font-black text-sm text-surface-950">
+                      <td className="text-right font-mono font-black text-sm text-surface-950 whitespace-nowrap">
                         {formatCurrency(b.grand_total_paise)}
                       </td>
                     </tr>

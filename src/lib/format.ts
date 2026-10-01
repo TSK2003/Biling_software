@@ -127,3 +127,32 @@ export function amountInWordsINR(paise: number): string {
 
   return words + ' Only';
 }
+
+/**
+ * Formats payment method for display (e.g. "UPI_CASH" -> "Cash + UPI", "cash" -> "Cash", "upi" -> "UPI")
+ */
+export function formatPaymentMethod(method?: string): string {
+  if (!method) return 'Cash';
+  const clean = method.trim();
+  const lower = clean.toLowerCase();
+
+  if (
+    lower === 'upi_cash' ||
+    lower === 'cash_upi' ||
+    lower === 'upi + cash' ||
+    lower === 'cash + upi' ||
+    lower === 'split'
+  ) {
+    return 'Cash + UPI';
+  }
+  if (lower === 'cash') return 'Cash';
+  if (lower === 'upi') return 'UPI';
+  if (lower === 'card') return 'Card';
+
+  return clean
+    .replace(/_/g, ' + ')
+    .split(' ')
+    .map((w) => (w.length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))
+    .join(' ');
+}
+

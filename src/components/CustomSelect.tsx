@@ -74,15 +74,15 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   }, [isOpen]);
 
   const sizeClasses = {
-    sm: 'h-8 px-2.5 text-xs rounded-lg gap-1.5',
-    md: 'h-9 px-3 text-xs rounded-xl gap-2',
-    lg: 'h-10 px-3.5 text-sm rounded-xl gap-2',
+    sm: 'h-8 px-2.5 text-xs rounded-md gap-1.5',
+    md: 'h-9 px-3 text-xs rounded-md gap-2',
+    lg: 'h-10 px-3.5 text-sm rounded-lg gap-2',
   }[size];
 
   const itemSizeClasses = {
     sm: 'px-2.5 py-1.5 text-xs rounded-md',
-    md: 'px-3 py-2 text-xs rounded-lg',
-    lg: 'px-3.5 py-2.5 text-sm rounded-lg',
+    md: 'px-3 py-2 text-xs rounded-md',
+    lg: 'px-3.5 py-2 text-sm rounded-md',
   }[size];
 
   return (
@@ -95,7 +95,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setIsOpen(!isOpen)}
-        className={`flex items-center justify-between bg-white border transition-all cursor-pointer font-medium ${
+        className={`w-full flex items-center justify-between bg-white border transition-colors cursor-pointer font-medium ${
           isOpen
             ? 'border-primary-500 ring-2 ring-primary-500/20 shadow-xs'
             : 'border-surface-200 hover:border-surface-300 shadow-2xs hover:bg-surface-50/50'
@@ -126,7 +126,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         <div
           className={`absolute ${
             align === 'right' ? 'right-0' : 'left-0'
-          } top-full mt-1.5 z-50 min-w-full w-max max-w-xs max-h-60 overflow-y-auto bg-white rounded-xl shadow-xl border border-surface-200/90 p-1.5 space-y-0.5 animate-in fade-in-0 zoom-in-95 duration-100 ${dropdownClassName}`}
+          } top-full mt-1.5 z-50 min-w-full w-full max-h-60 overflow-y-auto bg-white rounded-lg shadow-lg border border-surface-200 p-1 space-y-0.5 animate-in fade-in-0 zoom-in-95 duration-100 ${dropdownClassName}`}
           role="listbox"
         >
           {normalizedOptions.map((option) => {

@@ -1,6 +1,6 @@
 use tauri::State;
 use crate::AppState;
-use crate::models::{Bill, BillDetail, BillItem, Payment, PaginatedResponse};
+use crate::models::{Bill, BillDetail, BillItem, Payment, PaginatedResponse, ReturnedBillItemRecord};
 
 #[tauri::command]
 pub fn get_bills(
@@ -9,6 +9,7 @@ pub fn get_bills(
     date_from: Option<String>,
     date_to: Option<String>,
     status: Option<String>,
+    payment_method: Option<String>,
     search: Option<String>,
     category_id: Option<i64>,
     page: Option<i32>,
@@ -36,6 +37,9 @@ pub fn get_bills(
         }
         if let Some(ref s) = status {
             req = req.query(&[("status", s)]);
+        }
+        if let Some(ref pm) = payment_method {
+            req = req.query(&[("payment_method", pm)]);
         }
         if let Some(ref q) = search {
             req = req.query(&[("search", q)]);
@@ -124,6 +128,13 @@ pub fn get_bills(
         if !s.is_empty() {
             conditions.push(format!("b.status = ?{}", params.len() + 1));
             params.push(Box::new(s.to_string()));
+        }
+    }
+    if let Some(ref pm) = payment_method {
+        let pm = pm.trim();
+        if !pm.is_empty() {
+            conditions.push(format!("p.payment_method = ?{}", params.len() + 1));
+            params.push(Box::new(pm.to_string()));
         }
     }
     if let Some(ref q) = search {
@@ -277,10 +288,18 @@ pub fn get_bill_detail(state: State<'_, AppState>, bill_id: i64) -> Result<BillD
     
     // Get items
     let mut stmt = db.conn.prepare(
-        "SELECT id, bill_id, product_id, product_code_snapshot, product_name_snapshot,
-                category_name_snapshot, unit_price_paise, quantity, gst_enabled,
-                gst_percentage_x100, gst_amount_paise, line_total_paise
-         FROM bill_items WHERE bill_id = ?1 AND quantity > 0 ORDER BY sort_order"
+        "SELECT bi.id, bi.bill_id, bi.product_id,
+                COALESCE(NULLIF(bi.product_code_snapshot, ''), p.product_code, 'N/A') as product_code_snapshot,
+                COALESCE(NULLIF(bi.product_name_snapshot, ''), p.name, 'Item') as product_name_snapshot,
+                COALESCE(NULLIF(bi.category_name_snapshot, ''), c.name, 'General') as category_name_snapshot,
+                bi.unit_price_paise, bi.quantity, bi.gst_enabled,
+                bi.gst_percentage_x100, bi.gst_amount_paise, bi.line_total_paise,
+                COALESCE(bi.returned_quantity, 0) as returned_quantity
+         FROM bill_items bi
+         LEFT JOIN products p ON bi.product_id = p.id
+         LEFT JOIN categories c ON p.category_id = c.id
+         WHERE bi.bill_id = ?1
+         ORDER BY bi.sort_order ASC, bi.id ASC"
     ).map_err(|e| format!("Query error: {}", e))?;
     
     let items: Vec<BillItem> = stmt.query_map(rusqlite::params![bill_id], |row| {
@@ -297,6 +316,7 @@ pub fn get_bill_detail(state: State<'_, AppState>, bill_id: i64) -> Result<BillD
             gst_percentage_x100: row.get(9)?,
             gst_amount_paise: row.get(10)?,
             line_total_paise: row.get(11)?,
+            returned_quantity: row.get(12).unwrap_or(0),
         })
     }).map_err(|e| format!("Query error: {}", e))?
     .filter_map(|r| r.ok())
@@ -320,8 +340,65 @@ pub fn get_bill_detail(state: State<'_, AppState>, bill_id: i64) -> Result<BillD
             })
         },
     ).map_err(|_| "Payment record not found".to_string())?;
+
+    // Get returned items history
+    let mut returned_items: Vec<ReturnedBillItemRecord> = {
+        let ret_stmt = db.conn.prepare(
+            "SELECT bri.id, bri.bill_id, bri.bill_item_id, bri.product_id, bri.product_name,
+                    bri.product_code, bri.quantity, bri.unit_price_paise, bri.line_total_paise,
+                    COALESCE(br.reason, 'Customer Return'), bri.created_at, u.display_name
+             FROM bill_return_items bri
+             LEFT JOIN bill_returns br ON bri.bill_return_id = br.id
+             LEFT JOIN users u ON br.user_id = u.id
+             WHERE bri.bill_id = ?1
+             ORDER BY bri.id ASC"
+        ).ok();
+
+        if let Some(mut stmt) = ret_stmt {
+            stmt.query_map(rusqlite::params![bill_id], |row| {
+                Ok(ReturnedBillItemRecord {
+                    id: row.get(0)?,
+                    bill_id: row.get(1)?,
+                    bill_item_id: row.get(2)?,
+                    product_id: row.get(3)?,
+                    product_name: row.get(4)?,
+                    product_code: row.get(5)?,
+                    quantity: row.get(6)?,
+                    unit_price_paise: row.get(7)?,
+                    line_total_paise: row.get(8)?,
+                    reason: row.get(9)?,
+                    returned_at: row.get(10)?,
+                    returned_by_name: row.get(11)?,
+                })
+            }).map(|mapped| mapped.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    };
+
+    // Fallback: If no bill_return_items rows exist yet, but items have returned_quantity > 0
+    if returned_items.is_empty() {
+        for it in &items {
+            if it.returned_quantity > 0 {
+                returned_items.push(ReturnedBillItemRecord {
+                    id: it.id,
+                    bill_id: it.bill_id,
+                    bill_item_id: it.id,
+                    product_id: it.product_id,
+                    product_name: it.product_name_snapshot.clone(),
+                    product_code: it.product_code_snapshot.clone(),
+                    quantity: it.returned_quantity,
+                    unit_price_paise: it.unit_price_paise,
+                    line_total_paise: it.unit_price_paise * (it.returned_quantity as i64),
+                    reason: bill.void_reason.clone().unwrap_or_else(|| "Customer Return".to_string()),
+                    returned_at: bill.created_at.clone(),
+                    returned_by_name: bill.user_name.clone(),
+                });
+            }
+        }
+    }
     
-    Ok(BillDetail { bill, items, payment })
+    Ok(BillDetail { bill, items, payment, returned_items })
 }
 
 #[tauri::command]
@@ -402,7 +479,7 @@ pub fn void_bill(
             
             // Record reversal stock movement for audit trail
             tx.execute(
-                "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes) VALUES (?1, ?2, 'void_reversal', ?3, ?4, ?5)",
+                "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes) VALUES (?1, ?2, 'return', ?3, ?4, ?5)",
                 rusqlite::params![product_id, *quantity as i32, bill_id, user_id, format!("Stock restored: bill #{} voided. Reason: {}", bill_id, reason.trim())],
             ).map_err(|e| format!("Failed to record stock reversal for product {}: {}", product_id, e))?;
         }

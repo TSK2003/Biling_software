@@ -483,7 +483,7 @@ pub fn complete_bill_internal(
     
     // Insert payment
     let (final_cash, final_card, final_upi) = match payment_method.as_str() {
-        "cash" => (if cash >= grand_total_paise { cash } else { grand_total_paise }, 0i64, 0i64),
+        "cash" => (grand_total_paise, 0i64, 0i64),
         "card" => (0i64, grand_total_paise, 0i64),
         "upi" => (0i64, 0i64, grand_total_paise),
         "upi_cash" => {
@@ -600,6 +600,15 @@ pub fn return_bill(
 
     let tx = db.conn.transaction().map_err(|e| format!("Transaction error: {}", e))?;
 
+    let return_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    tx.execute(
+        "INSERT INTO bill_returns (bill_id, user_id, reason, refund_amount_paise, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![bill_id, user_id, reason.trim(), refund_amount_paise, return_timestamp],
+    ).map_err(|e| format!("Failed to record return transaction: {}", e))?;
+    let bill_return_id = tx.last_insert_rowid();
+
     // 1. Return items back to inventory stock and record stock movements
     for item in &items {
         if item.quantity <= 0 {
@@ -607,13 +616,14 @@ pub fn return_bill(
         }
 
         // Deduct returned quantity from bill_items and validate against current quantity
-        let item_data: Option<(i64, i64, i32, i32)> = tx.query_row(
-            "SELECT quantity, unit_price_paise, gst_enabled, gst_percentage_x100 FROM bill_items WHERE id = ?1",
+        let item_data: Option<(i64, i64, i32, i32, String, String)> = tx.query_row(
+            "SELECT quantity, unit_price_paise, gst_enabled, gst_percentage_x100, product_code_snapshot, product_name_snapshot 
+             FROM bill_items WHERE id = ?1",
             rusqlite::params![item.bill_item_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
         ).ok();
 
-        let (current_qty, unit_price, gst_enabled, gst_percentage_x100) = item_data
+        let (current_qty, unit_price, gst_enabled, gst_percentage_x100, prod_code, prod_name) = item_data
             .ok_or_else(|| format!("Bill item {} not found", item.bill_item_id))?;
 
         if item.quantity > current_qty {
@@ -640,25 +650,38 @@ pub fn return_bill(
             }
         }
 
-        let new_item_qty = current_qty - item.quantity;
-        if new_item_qty <= 0 {
-            // If entire quantity returned, remove from active bill items
-            tx.execute(
-                "DELETE FROM bill_items WHERE id = ?1",
-                rusqlite::params![item.bill_item_id],
-            ).map_err(|e| format!("Failed to update bill items: {}", e))?;
+        let new_item_qty = (current_qty - item.quantity).max(0);
+        let new_line_total = if new_item_qty > 0 { new_item_qty * unit_price } else { 0 };
+        let new_gst_amount = if new_item_qty > 0 && gst_enabled == 1 && gst_percentage_x100 > 0 {
+            ((new_line_total * gst_percentage_x100 as i64) + 5000) / 10000
         } else {
-            let new_line_total = new_item_qty * unit_price;
-            let new_gst_amount = if gst_enabled == 1 && gst_percentage_x100 > 0 {
-                ((new_line_total * gst_percentage_x100 as i64) + 5000) / 10000
-            } else {
-                0
-            };
-            tx.execute(
-                "UPDATE bill_items SET quantity = ?1, line_total_paise = ?2, gst_amount_paise = ?3 WHERE id = ?4",
-                rusqlite::params![new_item_qty, new_line_total, new_gst_amount, item.bill_item_id],
-            ).map_err(|e| format!("Failed to update bill items: {}", e))?;
-        }
+            0
+        };
+        tx.execute(
+            "UPDATE bill_items SET quantity = ?1, returned_quantity = COALESCE(returned_quantity, 0) + ?2, line_total_paise = ?3, gst_amount_paise = ?4 WHERE id = ?5",
+            rusqlite::params![new_item_qty, item.quantity, new_line_total, new_gst_amount, item.bill_item_id],
+        ).map_err(|e| format!("Failed to update bill items: {}", e))?;
+
+        let p_name = item.product_name.clone().unwrap_or(prod_name);
+        let p_code = prod_code;
+        let line_refund = unit_price * item.quantity;
+
+        tx.execute(
+            "INSERT INTO bill_return_items (bill_return_id, bill_id, bill_item_id, product_id, product_name, product_code, quantity, unit_price_paise, line_total_paise, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                bill_return_id,
+                bill_id,
+                item.bill_item_id,
+                item.product_id,
+                p_name,
+                p_code,
+                item.quantity,
+                unit_price,
+                line_refund,
+                return_timestamp,
+            ],
+        ).map_err(|e| format!("Failed to record return item details: {}", e))?;
     }
 
     // 2. Fetch remaining items counts and financials from bill_items

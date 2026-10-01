@@ -309,7 +309,11 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const loadInstalledPrinters = async () => {
+  const hasLoadedPrintersRef = useRef(false);
+
+  const loadInstalledPrinters = async (force = false) => {
+    if (isLoadingPrinters) return;
+    if (!force && hasLoadedPrintersRef.current && installedPrinters.length > 0) return;
     setIsLoadingPrinters(true);
     try {
       const [printers, defPrinter] = await Promise.all([
@@ -318,6 +322,7 @@ export const SettingsPage: React.FC = () => {
       ]);
       setInstalledPrinters(printers);
       setSystemDefaultPrinter(defPrinter);
+      hasLoadedPrintersRef.current = true;
     } catch (err) {
       console.error('Failed to load installed printers:', err);
     } finally {
@@ -327,7 +332,7 @@ export const SettingsPage: React.FC = () => {
 
   useEffect(() => {
     if (activeTab === 'printer') {
-      loadInstalledPrinters();
+      loadInstalledPrinters(false);
     } else if (activeTab === 'license') {
       loadDrives();
     }
@@ -373,14 +378,14 @@ export const SettingsPage: React.FC = () => {
 
       <div className="p-6 overflow-y-auto flex-1 w-full space-y-5">
         {/* Settings Navigation Tabs */}
-        <div className="bg-white p-1.5 rounded-2xl border border-surface-200/90 shadow-2xs flex items-center gap-1.5 flex-wrap">
+        <div className="bg-white p-1 rounded-lg border border-surface-200 shadow-xs flex items-center gap-1 flex-wrap">
           <button
             type="button"
             onClick={() => {
               setActiveTab('shop');
               setSearchParams({ tab: 'shop' });
             }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
               activeTab === 'shop'
                 ? 'bg-primary-600 text-white shadow-xs'
                 : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
@@ -396,7 +401,7 @@ export const SettingsPage: React.FC = () => {
               setActiveTab('gst');
               setSearchParams({ tab: 'gst' });
             }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
               activeTab === 'gst'
                 ? 'bg-primary-600 text-white shadow-xs'
                 : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
@@ -412,7 +417,7 @@ export const SettingsPage: React.FC = () => {
               setActiveTab('printer');
               setSearchParams({ tab: 'printer' });
             }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
               activeTab === 'printer'
                 ? 'bg-primary-600 text-white shadow-xs'
                 : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
@@ -428,7 +433,7 @@ export const SettingsPage: React.FC = () => {
               setActiveTab('network');
               setSearchParams({ tab: 'network' });
             }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
               activeTab === 'network'
                 ? 'bg-primary-600 text-white shadow-xs'
                 : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
@@ -444,7 +449,7 @@ export const SettingsPage: React.FC = () => {
               setActiveTab('backup');
               setSearchParams({ tab: 'backup' });
             }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
               activeTab === 'backup'
                 ? 'bg-primary-600 text-white shadow-xs'
                 : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
@@ -460,7 +465,7 @@ export const SettingsPage: React.FC = () => {
               setActiveTab('license');
               setSearchParams({ tab: 'license' });
             }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
               activeTab === 'license'
                 ? 'bg-primary-600 text-white shadow-xs'
                 : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
@@ -478,7 +483,7 @@ export const SettingsPage: React.FC = () => {
               setActiveTab('danger');
               setSearchParams({ tab: 'danger' });
             }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ml-auto ${
+            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ml-auto ${
               activeTab === 'danger'
                 ? 'bg-red-600 text-white shadow-xs'
                 : 'text-red-600 hover:bg-red-50 hover:text-red-700'
@@ -744,17 +749,19 @@ export const SettingsPage: React.FC = () => {
 
                 <div className="form-group">
                   <label className="form-label">Default GST Rate (%)</label>
-                  <select
+                  <CustomSelect
                     value={gstDefaultPct}
-                    onChange={(e) => setGstDefaultPct(e.target.value)}
-                    className="form-select font-mono"
-                  >
-                    <option value="0">0%</option>
-                    <option value="500">5%</option>
-                    <option value="1200">12%</option>
-                    <option value="1800">18%</option>
-                    <option value="2800">28%</option>
-                  </select>
+                    onChange={setGstDefaultPct}
+                    options={[
+                      { value: '0', label: '0%' },
+                      { value: '500', label: '5%' },
+                      { value: '1200', label: '12%' },
+                      { value: '1800', label: '18%' },
+                      { value: '2800', label: '28%' },
+                    ]}
+                    className="w-full"
+                    size="md"
+                  />
                 </div>
               </div>
             )}
@@ -793,7 +800,7 @@ export const SettingsPage: React.FC = () => {
 
                 <button
                   type="button"
-                  onClick={loadInstalledPrinters}
+                  onClick={() => loadInstalledPrinters(true)}
                   disabled={isLoadingPrinters}
                   className="btn-secondary h-9 px-3 text-xs font-semibold flex items-center gap-1.5"
                   title="Rescan connected USB and network printers"
@@ -820,6 +827,12 @@ export const SettingsPage: React.FC = () => {
                     onChange={(val) => {
                       setSelectedPrinter(val);
                       localStorage.setItem('pos_saved_printer_name', val);
+                      // Auto-switch to 80mm thermal if a thermal printer (like TVSE RP3200 Lite) is selected
+                      const isThermalModel = /thermal|rp3200|pos|receipt|tm-|tvs|star|xp-|mpt|zj-|bluetooth/i.test(val);
+                      if (isThermalModel && (!printerPaper || printerPaper === 'A4' || printerPaper === 'Letter' || printerPaper === 'B5')) {
+                        setPrinterPaper('Thermal80');
+                        localStorage.setItem('pos_saved_paper_size', 'Thermal80');
+                      }
                     }}
                     options={[
                       {
@@ -1348,21 +1361,21 @@ export const SettingsPage: React.FC = () => {
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-                  <select
+                  <CustomSelect
                     value={selectedDriveForBurn}
-                    onChange={(e) => setSelectedDriveForBurn(e.target.value)}
-                    className="form-select flex-1 text-xs font-medium bg-white h-10 rounded-xl"
-                  >
-                    {drives.length === 0 ? (
-                      <option value="">No USB Pen Drives Detected — Insert a pen drive and click Scan</option>
-                    ) : (
-                      drives.map((d) => (
-                        <option key={d.letter} value={d.letter}>
-                          {d.letter} ({d.label || 'Removable Storage'}) — {d.is_removable ? 'USB Pen Drive' : 'Drive'}
-                        </option>
-                      ))
-                    )}
-                  </select>
+                    onChange={setSelectedDriveForBurn}
+                    options={
+                      drives.length === 0
+                        ? [{ value: '', label: 'No USB Pen Drives Detected — Insert a pen drive and click Scan' }]
+                        : drives.map((d) => ({
+                            value: d.letter,
+                            label: `${d.letter} (${d.label || 'Removable Storage'}) — ${d.is_removable ? 'USB Pen Drive' : 'Drive'}`,
+                          }))
+                    }
+                    className="flex-1"
+                    size="md"
+                    placeholder="Select USB Drive..."
+                  />
 
                   <button
                     type="button"
