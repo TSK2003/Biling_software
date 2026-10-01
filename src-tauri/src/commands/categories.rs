@@ -10,7 +10,11 @@ pub fn get_categories(state: State<'_, AppState>, active_only: Option<bool>) -> 
     if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
         let client = crate::network::client::get_http_client();
         let url = format!("http://{}:{}/api/categories", host_ip, host_port);
-        let resp = client.get(&url)
+        let mut req = client.get(&url);
+        if let Some(active) = active_only {
+            req = req.query(&[("active_only", active.to_string())]);
+        }
+        let resp = req
             .send()
             .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
 
@@ -203,6 +207,9 @@ pub fn update_category(
 
 #[tauri::command]
 pub fn delete_category(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    // Backend authorization: require admin to delete categories
+    crate::commands::auth::require_admin()?;
+
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
 
     // If in Client mode, forward delete to Host PC
@@ -219,20 +226,71 @@ pub fn delete_category(state: State<'_, AppState>, id: i64) -> Result<(), String
         return Ok(());
     }
     
-    // Delete any products assigned to this category
-    let _ = db.conn.execute("DELETE FROM products WHERE category_id = ?1", rusqlite::params![id]);
-    
-    // Delete category permanently from database
+    // P0 FIX: Block deletion if products exist in this category — NEVER silently cascade-delete products
+    let product_count: i64 = db.conn.query_row(
+        "SELECT COUNT(*) FROM products WHERE category_id = ?1",
+        rusqlite::params![id],
+        |r| r.get(0),
+    ).unwrap_or(0);
+
+    if product_count > 0 {
+        return Err(format!(
+            "Cannot delete this category because it contains {} product(s). Please move or delete the products first.",
+            product_count
+        ));
+    }
+
+    // Check if any historical bill_items reference this category name (audit safety)
+    let category_name: String = db.conn.query_row(
+        "SELECT name FROM categories WHERE id = ?1",
+        rusqlite::params![id],
+        |r| r.get(0),
+    ).unwrap_or_default();
+
+    // Delete category permanently from database (safe — no products exist)
     db.conn.execute(
         "DELETE FROM categories WHERE id = ?1",
         rusqlite::params![id],
     ).map_err(|e| format!("Delete failed: {}", e))?;
     
     // Audit log
-    let _ = db.conn.execute(
-        "INSERT INTO audit_logs (action, entity_type, entity_id) VALUES ('delete', 'category', ?1)",
-        rusqlite::params![id],
-    );
+    db.conn.execute(
+        "INSERT INTO audit_logs (action, entity_type, entity_id, details_json) VALUES ('delete', 'category', ?1, ?2)",
+        rusqlite::params![id, format!("{{\"name\":\"{}\",\"had_products\":false}}", category_name)],
+    ).map_err(|e| format!("Audit log failed: {}", e))?;
     
     Ok(())
 }
+
+#[tauri::command]
+pub fn reorder_categories(state: State<'_, AppState>, ordered_ids: Vec<i64>) -> Result<(), String> {
+    let mut db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, forward update to Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = crate::network::client::get_http_client();
+        let url = format!("http://{}:{}/api/categories/reorder", host_ip, host_port);
+        let resp = client.post(&url)
+            .json(&ordered_ids)
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+        if !resp.status().is_success() {
+            let err = resp.text().unwrap_or_else(|_| "Host error reordering categories".to_string());
+            return Err(err);
+        }
+        return Ok(());
+    }
+
+    let tx = db.conn.transaction().map_err(|e| format!("Transaction failed: {}", e))?;
+    for (i, &id) in ordered_ids.iter().enumerate() {
+        let order = (i + 1) as i32;
+        tx.execute(
+            "UPDATE categories SET sort_order = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![order, id],
+        ).map_err(|e| format!("Failed to update category order: {}", e))?;
+    }
+    tx.commit().map_err(|e| format!("Transaction commit failed: {}", e))?;
+
+    Ok(())
+}
+

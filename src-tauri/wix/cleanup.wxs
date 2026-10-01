@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <CustomAction
+      Id="PurgeBillingSoftwareData"
+      Directory="TARGETDIR"
+      Execute="deferred"
+      Impersonate="no"
+      ExeCommand='cmd.exe /C "taskkill /F /IM billing* /T 2>nul &amp; taskkill /F /IM msedgewebview2* /T 2>nul &amp; for /D %U in (C:\Users\*) do (rmdir /S /Q &quot;%~U\AppData\Local\com.billing.software&quot; 2>nul &amp; rmdir /S /Q &quot;%~U\AppData\Roaming\com.billing.software&quot; 2>nul &amp; rmdir /S /Q &quot;%~U\AppData\Local\Billing Software&quot; 2>nul &amp; rmdir /S /Q &quot;%~U\AppData\Roaming\Billing Software&quot; 2>nul &amp; rmdir /S /Q &quot;%~U\AppData\Local\com.billing.pos&quot; 2>nul &amp; rmdir /S /Q &quot;%~U\AppData\Roaming\com.billing.pos&quot; 2>nul &amp; rmdir /S /Q &quot;%~U\AppData\Local\billing-software&quot; 2>nul &amp; rmdir /S /Q &quot;%~U\AppData\Roaming\billing-software&quot; 2>nul) &amp; rmdir /S /Q &quot;C:\ProgramData\Billing Software&quot; 2>nul &amp; rmdir /S /Q &quot;C:\ProgramData\com.billing.software&quot; 2>nul"'
+      Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="PurgeBillingSoftwareData" Before="RemoveFiles">
+        (REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE) OR (NOT Installed AND NOT UPGRADINGPRODUCTCODE)
+      </Custom>
+    </InstallExecuteSequence>
+
+    <ComponentGroup Id="CleanAppDataComponentGroup">
+      <Component Id="CleanAppDataHook" Directory="TARGETDIR" Guid="7c9e334a-9b12-4f32-8e12-4c2847291a2b">
+        <RegistryValue Root="HKCU" Key="Software\billing\Billing Software" Name="PurgeOnUninstall" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

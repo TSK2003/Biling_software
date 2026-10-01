@@ -8,7 +8,8 @@ export type ScreenPermission =
   | 'reports'
   | 'backup'
   | 'users'
-  | 'settings';
+  | 'settings'
+  | 'expenses';
 
 export type UserRole = 'admin' | 'manager' | 'inventory_staff' | 'cashier' | 'staff' | 'custom';
 
@@ -19,7 +20,6 @@ export interface User {
   role: UserRole | string;
   is_active: boolean;
   max_discount_pct: number;
-  plain_password?: string;
   permissions: ScreenPermission[] | string[];
   created_at: string;
   updated_at: string;
@@ -54,6 +54,9 @@ export interface Product {
   gst_percentage_x100: number;
   barcode: string | null;
   is_active: boolean;
+  is_restockable?: boolean;
+  buying_price_paise?: number;
+  current_stock?: number;
   created_at: string;
   updated_at: string;
 }
@@ -68,6 +71,9 @@ export interface BillingProduct {
   selling_price_paise: number;
   gst_enabled: boolean;
   gst_percentage_x100: number;
+  is_restockable?: boolean;
+  buying_price_paise?: number;
+  current_stock?: number;
 }
 
 // Cart Types
@@ -171,6 +177,8 @@ export interface DashboardStats {
   total_discount_paise: number;
   total_gst_paise: number;
   avg_bill_paise: number;
+  total_expenses_paise?: number;
+  net_income_paise?: number;
 }
 
 export interface SalesTrendItem {
@@ -322,3 +330,205 @@ export interface ReturnBillRequest {
   items: ReturnBillItem[];
   refundAmountPaise: number;
 }
+
+// Expense Types
+export interface ExpenseCategory {
+  id: number;
+  name: string;
+  description?: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Expense {
+  id: number;
+  expense_number: number;
+  expense_date: string;
+  category_id: number;
+  category_name?: string;
+  title: string;
+  description?: string;
+  amount_paise: number;
+  payment_method: string;
+  paid_by_user_id: number;
+  paid_by_name?: string;
+  payee?: string;
+  reference_number?: string;
+  notes?: string;
+  status: 'active' | 'cancelled';
+  cancelled_reason?: string;
+  cancelled_by?: number;
+  cancelled_by_name?: string;
+  cancelled_at?: string;
+  created_by: number;
+  created_by_name?: string;
+  created_at: string;
+  updated_by?: number;
+  updated_at: string;
+}
+
+export interface ExpenseSummary {
+  today_total_paise: number;
+  today_count: number;
+  month_total_paise: number;
+  month_count: number;
+  range_total_paise: number;
+  range_count: number;
+  cancelled_range_total_paise: number;
+  cancelled_range_count: number;
+  category_totals: CategoryExpenseTotal[];
+}
+
+export interface CategoryExpenseTotal {
+  category_id: number;
+  category_name: string;
+  total_paise: number;
+  count: number;
+}
+
+export interface CreateExpenseRequest {
+  expense_date: string;
+  category_id: number;
+  title: string;
+  description?: string;
+  amount_paise: number;
+  payment_method: string;
+  paid_by_user_id?: number;
+  payee?: string;
+  reference_number?: string;
+  notes?: string;
+}
+
+export interface UpdateExpenseRequest {
+  id: number;
+  expense_date?: string;
+  category_id?: number;
+  title?: string;
+  description?: string;
+  amount_paise?: number;
+  payment_method?: string;
+  paid_by_user_id?: number;
+  payee?: string;
+  reference_number?: string;
+  notes?: string;
+}
+
+export interface ExpensesFilterRequest {
+  date_from?: string;
+  date_to?: string;
+  category_id?: number;
+  payment_method?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  page_size?: number;
+}
+
+// Printer Types
+export interface PrinterInfo {
+  name: string;
+  is_default: boolean;
+  is_online: boolean;
+  port?: string | null;
+}
+
+export interface PrintReceiptItem {
+  name: string;
+  quantity: number;
+  unit_price_paise: number;
+  line_total_paise: number;
+}
+
+export interface PrintReceiptRequest {
+  bill_id?: number;
+  bill_number?: number;
+  business_date?: string;
+  bill_time?: string;
+  cashier_name?: string;
+  items?: PrintReceiptItem[];
+  subtotal_paise?: number;
+  discount_amount_paise?: number;
+  gst_total_paise?: number;
+  grand_total_paise?: number;
+  payment_method?: string;
+  tendered_cash_paise?: number;
+  change_due_paise?: number;
+  printer_name?: string;
+  paper_size?: string;
+  copies?: number;
+  shop_logo?: string;
+}
+
+export interface ProductExportResult {
+  file_path: string;
+  total_count: number;
+}
+
+export interface ProductCsvExportResult {
+  file_path: string;
+  csv_content: string;
+  total_count: number;
+}
+
+export interface ProductImportSummary {
+  total_rows: number;
+  created_count: number;
+  updated_count: number;
+  new_categories_count: number;
+  errors: string[];
+}
+
+export interface BackupManifest {
+  backup_format_version: string;
+  app_version: string;
+  schema_version: number;
+  backup_timestamp: string;
+  backup_date?: string;
+  shop_id: string;
+  shop_name: string;
+  device_independent_id?: string;
+  product_count: number;
+  category_count: number;
+  bill_count: number;
+  payment_count: number;
+  expense_count: number;
+  user_count: number;
+  asset_count: number;
+  image_count?: number;
+  report_count?: number;
+  checksum_sha256?: string;
+}
+
+export interface BackupRecord {
+  id: number;
+  backup_type: string;
+  backup_path: string;
+  manifest_json?: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface AutoBackupStatus {
+  enabled: boolean;
+  last_date?: string | null;
+  last_time?: string | null;
+  folder_path: string;
+  total_backups: number;
+}
+
+export interface AwsBackupResponse {
+  package_path: string;
+  excel_path: string;
+  package_name: string;
+  excel_name: string;
+  package_size: number;
+  excel_size: number;
+  sha256: string;
+  drive_url: string;
+  timestamp: string;
+  message: string;
+}
+
+

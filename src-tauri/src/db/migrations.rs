@@ -2,7 +2,7 @@ use rusqlite::params;
 use super::connection::Database;
 
 /// Schema version tracking
-pub const CURRENT_SCHEMA_VERSION: i32 = 6;
+pub const CURRENT_SCHEMA_VERSION: i32 = 10;
 
 /// Run all database migrations
 pub fn run_migrations(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
@@ -43,6 +43,15 @@ pub fn run_migrations(db: &mut Database) -> Result<(), Box<dyn std::error::Error
     }
     if current_version < 7 {
         apply_v7(db)?;
+    }
+    if current_version < 8 {
+        apply_v8(db)?;
+    }
+    if current_version < 9 {
+        apply_v9(db)?;
+    }
+    if current_version < 10 {
+        apply_v10(db)?;
     }
     
     Ok(())
@@ -99,6 +108,8 @@ fn apply_v1(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
             gst_percentage_x100     INTEGER NOT NULL DEFAULT 0 CHECK (gst_percentage_x100 >= 0),
             barcode                 TEXT,
             is_active               INTEGER NOT NULL DEFAULT 1,
+            is_restockable          INTEGER NOT NULL DEFAULT 0,
+            buying_price_paise      INTEGER NOT NULL DEFAULT 0,
             created_at              TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE RESTRICT
@@ -315,13 +326,16 @@ fn apply_v1(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
         params![password_hash],
     )?;
     
-    // Seed default categories
+    // Seed default categories matching canonical catalog
     let categories = [
-        ("Juice", 1),
-        ("Snacks", 2),
-        ("Fast Food", 3),
-        ("Ice Cream", 4),
-        ("Others", 5),
+        ("Juice & Beverages", 1),
+        ("Snacks & Chaat", 2),
+        ("Fast Food & Burgers", 3),
+        ("Ice Cream & Desserts", 4),
+        ("Bakery & Pastries", 5),
+        ("Tea & Coffee", 6),
+        ("Meals & Combos", 7),
+        ("Packaged Goods", 8),
     ];
     for (name, order) in &categories {
         tx.execute(
@@ -454,9 +468,9 @@ fn apply_v2(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
     
-    // Register the Host machine device automatically as approved
+    // Register the Host machine device automatically as approved with a secure token
     let host_device_id = "DEV-HOST-000001";
-    let host_token = "HOST-MASTER-TOKEN";
+    let host_token = format!("HOST-{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
     tx.execute(
         "INSERT OR IGNORE INTO devices (device_id, device_name, device_type, ip_address, is_approved, is_active, api_token)
          VALUES (?1, 'MAIN-HOST-PC', 'host', '127.0.0.1', 1, 1, ?2)",
@@ -617,10 +631,10 @@ fn apply_v4(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
     let _ = tx.execute("ALTER TABLE users ADD COLUMN plain_password TEXT", []);
     let _ = tx.execute("ALTER TABLE users ADD COLUMN permissions_json TEXT", []);
     
-    // Update admin user with default credentials and full 9 screen permissions
-    let all_screens = r#"["billing","bills","dashboard","products","categories","reports","backup","users","settings"]"#;
+    // Update admin user with full screen permissions (no plain text password)
+    let all_screens = r#"["billing","bills","dashboard","products","categories","reports","backup","users","settings","expenses"]"#;
     let _ = tx.execute(
-        "UPDATE users SET plain_password = 'admin123', permissions_json = ?1 WHERE id = 1 AND (plain_password IS NULL OR plain_password = '')",
+        "UPDATE users SET plain_password = NULL, permissions_json = ?1 WHERE id = 1",
         params![all_screens],
     );
     
@@ -758,6 +772,197 @@ fn apply_v7(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
     ")?;
     tx.commit()?;
     log::info!("Database migration v7 (Zero out cancelled bills GST and financial totals) applied successfully");
+    Ok(())
+}
+
+/// Version 8: Expense Management tables & nullify cleartext passwords
+fn apply_v8(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
+    let tx = db.conn.transaction()?;
+    
+    // Create expense categories and sequence tables
+    tx.execute_batch("
+        CREATE TABLE IF NOT EXISTS expense_categories (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            description TEXT,
+            is_active   INTEGER NOT NULL DEFAULT 1,
+            sort_order  INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_expense_categories_active ON expense_categories(is_active);
+        CREATE INDEX IF NOT EXISTS idx_expense_categories_sort ON expense_categories(sort_order);
+
+        CREATE TABLE IF NOT EXISTS expense_number_seq (
+            id          INTEGER PRIMARY KEY CHECK (id = 1),
+            last_number INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT OR IGNORE INTO expense_number_seq (id, last_number) VALUES (1, 0);
+
+        CREATE TABLE IF NOT EXISTS expenses (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            expense_number      INTEGER NOT NULL,
+            expense_date        TEXT NOT NULL,
+            category_id         INTEGER NOT NULL,
+            title               TEXT NOT NULL,
+            description         TEXT,
+            amount_paise        INTEGER NOT NULL CHECK (amount_paise >= 0),
+            payment_method      TEXT NOT NULL DEFAULT 'cash' CHECK (payment_method IN ('cash', 'card', 'upi', 'bank_transfer', 'cheque')),
+            paid_by_user_id     INTEGER NOT NULL,
+            payee               TEXT,
+            reference_number    TEXT,
+            notes               TEXT,
+            status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+            cancelled_reason    TEXT,
+            cancelled_by        INTEGER,
+            cancelled_at        TEXT,
+            created_by          INTEGER NOT NULL,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_by          INTEGER,
+            updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (category_id) REFERENCES expense_categories(id) ON DELETE RESTRICT,
+            FOREIGN KEY (paid_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (cancelled_by) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT
+        );
+        CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+        CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id);
+        CREATE INDEX IF NOT EXISTS idx_expenses_status ON expenses(status);
+        CREATE INDEX IF NOT EXISTS idx_expenses_number ON expenses(expense_number);
+    ")?;
+
+    // Seed default expense categories if empty
+    let cat_count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM expense_categories",
+        [],
+        |r| r.get(0),
+    ).unwrap_or(0);
+
+    if cat_count == 0 {
+        let default_categories = [
+            ("Rent", "Store/Shop premises rent", 1),
+            ("Electricity & Utilities", "Power, water, and utility bills", 2),
+            ("Salaries & Wages", "Employee salaries, daily wages, and incentives", 3),
+            ("Inventory & Supplies", "Goods, packaging, and raw material purchases", 4),
+            ("Transportation & Fuel", "Delivery, fuel, freight, and vehicle maintenance", 5),
+            ("Maintenance & Repairs", "Equipment, shop repair, and upkeep", 6),
+            ("Tea & Refreshments", "Daily tea, snacks, and water for staff", 7),
+            ("Marketing & Advertising", "Promotions, flyers, and advertising", 8),
+            ("Internet & Phone", "Broadband, phone recharge, and communication", 9),
+            ("Miscellaneous", "Other unexpected or petty cash expenses", 10),
+        ];
+
+        for (name, desc, sort) in default_categories.iter() {
+            tx.execute(
+                "INSERT INTO expense_categories (name, description, sort_order) VALUES (?1, ?2, ?3)",
+                params![name, desc, sort],
+            )?;
+        }
+    }
+
+    // Security fix: Nullify any remaining plain_password entries
+    let _ = tx.execute("UPDATE users SET plain_password = NULL", []);
+
+    // Ensure admin user permissions include 'expenses'
+    let admin_perms: Option<String> = tx.query_row(
+        "SELECT permissions_json FROM users WHERE id = 1 OR role = 'admin' LIMIT 1",
+        [],
+        |r| r.get(0),
+    ).ok();
+
+    if let Some(json_str) = admin_perms {
+        if let Ok(mut perms) = serde_json::from_str::<Vec<String>>(&json_str) {
+            if !perms.contains(&"expenses".to_string()) {
+                perms.push("expenses".to_string());
+                let updated = serde_json::to_string(&perms).unwrap_or_default();
+                let _ = tx.execute(
+                    "UPDATE users SET permissions_json = ?1 WHERE id = 1 OR role = 'admin'",
+                    params![updated],
+                );
+            }
+        }
+    }
+
+    // Record schema version 8
+    tx.execute("INSERT INTO schema_version (version) VALUES (8)", [])?;
+
+    tx.commit()?;
+    log::info!("Database migration v8 (Expense Management & Plain Password Nullification) applied successfully");
+    Ok(())
+}
+
+/// Version 9: Configure Google Drive default link and move existing backups to Downloads
+fn apply_v9(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
+    let tx = db.conn.transaction()?;
+
+    let drive_link = "";
+    let drive_id = "";
+
+    tx.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('gdrive_folder_id', ?1)",
+        params![drive_id],
+    )?;
+
+    tx.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('gdrive_folder_url', ?1)",
+        params![drive_link],
+    )?;
+
+    tx.execute(
+        "INSERT INTO settings (key, value) VALUES ('gdrive_auto_sync', 'true')
+         ON CONFLICT(key) DO UPDATE SET value = 'true'",
+        [],
+    )?;
+
+    tx.execute(
+        "INSERT INTO settings (key, value) VALUES ('gdrive_connected', 'true')
+         ON CONFLICT(key) DO UPDATE SET value = 'true'",
+        [],
+    )?;
+
+    tx.execute("INSERT INTO schema_version (version) VALUES (9)", [])?;
+    tx.commit()?;
+
+    // Copy any previous local backup archives to user's Downloads folder
+    let downloads_dir = crate::services::backup_service::BackupService::get_downloads_dir();
+    let _ = std::fs::create_dir_all(&downloads_dir);
+
+    if let Ok(mut stmt) = db.conn.prepare("SELECT id, backup_path FROM backup_records") {
+        let rows: Vec<(i64, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|it| it.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default();
+
+        for (id, old_path) in rows {
+            let p = std::path::Path::new(&old_path);
+            if p.exists() {
+                if let Some(file_name) = p.file_name() {
+                    let new_dest = downloads_dir.join(file_name);
+                    let _ = std::fs::copy(p, &new_dest);
+                    let new_path_str = new_dest.to_string_lossy().to_string();
+                    let _ = db.conn.execute(
+                        "UPDATE backup_records SET backup_path = ?1 WHERE id = ?2",
+                        params![new_path_str, id],
+                    );
+                }
+            }
+        }
+    }
+
+    log::info!("Database migration v9 (Google Drive configured & Backups moved to Downloads) applied successfully");
+    Ok(())
+}
+
+/// Version 10: Add is_restockable and buying_price_paise columns to products
+fn apply_v10(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
+    let tx = db.conn.transaction()?;
+
+    let _ = tx.execute("ALTER TABLE products ADD COLUMN is_restockable INTEGER NOT NULL DEFAULT 0", []);
+    let _ = tx.execute("ALTER TABLE products ADD COLUMN buying_price_paise INTEGER NOT NULL DEFAULT 0", []);
+
+    tx.execute("INSERT INTO schema_version (version) VALUES (10)", [])?;
+    tx.commit()?;
+
+    log::info!("Database migration v10 (Restockable products & buying price) applied successfully");
     Ok(())
 }
 

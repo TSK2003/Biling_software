@@ -10,7 +10,6 @@ pub struct User {
     pub role: String,
     pub is_active: bool,
     pub max_discount_pct: i32,
-    pub plain_password: Option<String>,
     pub permissions: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -89,6 +88,9 @@ pub struct Product {
     pub gst_percentage_x100: i32,
     pub barcode: Option<String>,
     pub is_active: bool,
+    pub is_restockable: bool,
+    pub buying_price_paise: i64,
+    pub current_stock: i32,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -100,6 +102,9 @@ pub struct CreateProductRequest {
     pub selling_price_paise: i64,
     pub gst_enabled: Option<bool>,
     pub gst_percentage_x100: Option<i32>,
+    pub is_restockable: Option<bool>,
+    pub buying_price_paise: Option<i64>,
+    pub initial_stock: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -111,6 +116,8 @@ pub struct UpdateProductRequest {
     pub gst_enabled: Option<bool>,
     pub gst_percentage_x100: Option<i32>,
     pub is_active: Option<bool>,
+    pub is_restockable: Option<bool>,
+    pub buying_price_paise: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,6 +142,9 @@ pub struct BillingProduct {
     pub selling_price_paise: i64,
     pub gst_enabled: bool,
     pub gst_percentage_x100: i32,
+    pub is_restockable: bool,
+    pub buying_price_paise: i64,
+    pub current_stock: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +153,8 @@ pub struct CartItem {
     pub product_code: String,
     pub product_name: String,
     pub category_name: String,
+    #[serde(default)]
+    pub image_path: Option<String>,
     pub unit_price_paise: i64,
     pub quantity: i32,
     pub gst_enabled: bool,
@@ -234,7 +246,7 @@ pub struct BillItem {
     pub line_total_paise: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BillDetail {
     pub bill: Bill,
     pub items: Vec<BillItem>,
@@ -265,8 +277,8 @@ pub struct BillsFilterRequest {
     pub page_size: Option<i32>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct PaginatedResponse<T: Serialize> {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PaginatedResponse<T> {
     pub data: Vec<T>,
     pub total: i64,
     pub page: i32,
@@ -276,7 +288,7 @@ pub struct PaginatedResponse<T: Serialize> {
 
 // ========== DASHBOARD ==========
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardStats {
     pub total_sales_paise: i64,
     pub total_bills: i64,
@@ -287,6 +299,10 @@ pub struct DashboardStats {
     pub total_discount_paise: i64,
     pub total_gst_paise: i64,
     pub avg_bill_paise: i64,
+    #[serde(default)]
+    pub total_expenses_paise: Option<i64>,
+    #[serde(default)]
+    pub net_income_paise: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,7 +311,7 @@ pub struct DashboardRequest {
     pub date_to: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SalesTrendItem {
     pub date: String,
     pub total_sales_paise: i64,
@@ -388,19 +404,50 @@ pub struct DriveInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupManifest {
-    pub backup_version: String,
+    #[serde(alias = "backup_version", default = "default_backup_version")]
+    pub backup_format_version: String,
+    #[serde(default = "default_app_version")]
     pub app_version: String,
+    #[serde(default = "default_schema_version")]
     pub schema_version: i32,
+    #[serde(default = "default_backup_timestamp")]
+    pub backup_timestamp: String,
+    #[serde(default = "default_backup_timestamp")]
     pub backup_date: String,
+    #[serde(default = "default_shop_id")]
     pub shop_id: String,
+    #[serde(default = "default_shop_name")]
     pub shop_name: String,
+    #[serde(default)]
+    pub device_independent_id: String,
+    #[serde(default)]
     pub product_count: i64,
+    #[serde(default)]
     pub category_count: i64,
+    #[serde(default)]
     pub bill_count: i64,
+    #[serde(default)]
+    pub payment_count: i64,
+    #[serde(default)]
+    pub expense_count: i64,
+    #[serde(default)]
+    pub user_count: i64,
+    #[serde(default)]
+    pub asset_count: i64,
+    #[serde(default)]
     pub image_count: i64,
+    #[serde(default)]
     pub report_count: i64,
+    #[serde(default)]
     pub checksum_sha256: String,
 }
+
+fn default_backup_version() -> String { "2.0.0".to_string() }
+fn default_app_version() -> String { "0.1.0".to_string() }
+fn default_schema_version() -> i32 { 2 }
+fn default_backup_timestamp() -> String { chrono::Local::now().to_rfc3339() }
+fn default_shop_id() -> String { "SHOP-BILLING-000001".to_string() }
+fn default_shop_name() -> String { "Billing Software Shop".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupRecord {
@@ -410,6 +457,29 @@ pub struct BackupRecord {
     pub manifest_json: Option<String>,
     pub size_bytes: i64,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoBackupStatus {
+    pub enabled: bool,
+    pub last_date: Option<String>,
+    pub last_time: Option<String>,
+    pub folder_path: String,
+    pub total_backups: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AwsBackupResponse {
+    pub package_path: String,
+    pub excel_path: String,
+    pub package_name: String,
+    pub excel_name: String,
+    pub package_size: i64,
+    pub excel_size: i64,
+    pub sha256: String,
+    pub drive_url: String,
+    pub timestamp: String,
+    pub message: String,
 }
 
 // ========== IMPORT ==========
@@ -514,3 +584,159 @@ pub struct InventoryItem {
     pub low_stock_threshold: i32,
     pub updated_at: String,
 }
+
+// ========== EXPENSE CATEGORY ==========
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpenseCategory {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_active: bool,
+    pub sort_order: i32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+// ========== EXPENSE ==========
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Expense {
+    pub id: i64,
+    pub expense_number: i32,
+    pub expense_date: String,
+    pub category_id: i64,
+    pub category_name: Option<String>,
+    pub title: String,
+    pub description: Option<String>,
+    pub amount_paise: i64,
+    pub payment_method: String,
+    pub paid_by_user_id: i64,
+    pub paid_by_name: Option<String>,
+    pub payee: Option<String>,
+    pub reference_number: Option<String>,
+    pub notes: Option<String>,
+    pub status: String,
+    pub cancelled_reason: Option<String>,
+    pub cancelled_by: Option<i64>,
+    pub cancelled_by_name: Option<String>,
+    pub cancelled_at: Option<String>,
+    pub created_by: i64,
+    pub created_by_name: Option<String>,
+    pub created_at: String,
+    pub updated_by: Option<i64>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExpenseSummary {
+    pub today_total_paise: i64,
+    pub today_count: i64,
+    pub month_total_paise: i64,
+    pub month_count: i64,
+    pub range_total_paise: i64,
+    pub range_count: i64,
+    pub cancelled_range_total_paise: i64,
+    pub cancelled_range_count: i64,
+    pub category_totals: Vec<CategoryExpenseTotal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryExpenseTotal {
+    pub category_id: i64,
+    pub category_name: String,
+    pub total_paise: i64,
+    pub count: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateExpenseCategoryRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateExpenseCategoryRequest {
+    pub id: i64,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub sort_order: Option<i32>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateExpenseRequest {
+    pub expense_date: String,
+    pub category_id: i64,
+    pub title: String,
+    pub description: Option<String>,
+    pub amount_paise: i64,
+    pub payment_method: String,
+    pub paid_by_user_id: Option<i64>,
+    pub payee: Option<String>,
+    pub reference_number: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateExpenseRequest {
+    pub id: i64,
+    pub expense_date: Option<String>,
+    pub category_id: Option<i64>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub amount_paise: Option<i64>,
+    pub payment_method: Option<String>,
+    pub paid_by_user_id: Option<i64>,
+    pub payee: Option<String>,
+    pub reference_number: Option<String>,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExpensesFilterRequest {
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub category_id: Option<i64>,
+    pub payment_method: Option<String>,
+    pub status: Option<String>,
+    pub search: Option<String>,
+    pub page: Option<i32>,
+    pub page_size: Option<i32>,
+}
+
+// ========== PRINTER ==========
+
+pub use crate::services::printer_service::PrinterInfo;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrintReceiptItem {
+    pub name: String,
+    pub quantity: i32,
+    pub unit_price_paise: i64,
+    pub line_total_paise: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrintReceiptRequest {
+    pub bill_id: Option<i64>,
+    pub bill_number: Option<i32>,
+    pub business_date: Option<String>,
+    pub bill_time: Option<String>,
+    pub cashier_name: Option<String>,
+    pub items: Option<Vec<PrintReceiptItem>>,
+    pub subtotal_paise: Option<i64>,
+    pub discount_amount_paise: Option<i64>,
+    pub gst_total_paise: Option<i64>,
+    pub grand_total_paise: Option<i64>,
+    pub payment_method: Option<String>,
+    pub tendered_cash_paise: Option<i64>,
+    pub change_due_paise: Option<i64>,
+    pub printer_name: Option<String>,
+    pub paper_size: Option<String>,
+    pub copies: Option<i32>,
+    pub shop_logo: Option<String>,
+}
+
+

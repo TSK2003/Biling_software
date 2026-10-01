@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Setting } from '../types';
 import { api } from '../lib/ipc';
+import { setGlobalCurrencySymbol } from '../lib/format';
 
 interface SettingsContextType {
   settings: Record<string, string>;
@@ -28,6 +29,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         map[s.key] = s.value;
       }
       setSettings(map);
+      if (map['currency_symbol']) {
+        setGlobalCurrencySymbol(map['currency_symbol']);
+      }
     } catch {
       // ignore
     } finally {
@@ -38,6 +42,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateSetting = async (key: string, value: string) => {
     await api.updateSetting(key, value);
     setSettings(prev => ({ ...prev, [key]: value }));
+    if (key === 'currency_symbol') {
+      setGlobalCurrencySymbol(value);
+    }
   };
 
   useEffect(() => {

@@ -1,17 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Plus,
   Edit2,
   Trash2,
   Power,
   Search,
-  Calendar,
-  RotateCcw,
   Info,
   GripVertical,
+  ChevronUp,
+  ChevronDown,
+  ArrowUpDown,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
-import { getTodayDateString } from '../../lib/format';
 import { Modal } from '../../components/Modal';
 import { ConfirmModal } from '../../components/ConfirmModal';
 import { Header } from '../../components/Header';
@@ -19,7 +19,6 @@ import type { Category } from '../../types';
 import toast from 'react-hot-toast';
 
 export const CategoriesPage: React.FC = () => {
-  const todayStr = getTodayDateString();
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -27,21 +26,15 @@ export const CategoriesPage: React.FC = () => {
   const [draggedCatId, setDraggedCatId] = useState<number | null>(null);
   const [dragOverCatId, setDragOverCatId] = useState<number | null>(null);
   const [pickedCategory, setPickedCategory] = useState<Category | null>(null);
-  const isPointerDraggingRef = useRef(false);
-  const pointerStartPosRef = useRef({ x: 0, y: 0 });
-  const draggedCatIdRef = useRef<number | null>(null);
   const [productCounts, setProductCounts] = useState<Record<number, number>>({});
 
   // Filter & Search states
   const [searchQuery, setSearchQuery] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
 
-  // Add/Edit Modal
+  // Add/Edit Modal (Display Sort Order input removed - automatically managed sequentially)
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [formName, setFormName] = useState('');
-  const [formSortOrder, setFormSortOrder] = useState('0');
   const [isSaving, setIsSaving] = useState(false);
 
   // Delete Confirmation Modal
@@ -55,9 +48,21 @@ export const CategoriesPage: React.FC = () => {
         api.getCategories(false),
         api.getProducts(undefined, false, 1, 5000).catch(() => ({ data: [] })),
       ]);
-      // Sort by sort_order for correct display order
-      list.sort((a, b) => a.sort_order - b.sort_order);
-      setCategories(list);
+      // Sort by sort_order for correct display order, tie-break by name
+      list.sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name));
+
+      // Clean up any messy, duplicate, or gapped sort orders (e.g. duplicate #5, missing #2)
+      const hasMessyOrders = list.some((cat, i) => cat.sort_order !== i + 1);
+      const normalized = list.map((cat, i) => ({
+        ...cat,
+        sort_order: i + 1,
+      }));
+      setCategories(normalized);
+
+      // Auto-heal database in background so categories are strictly 1..N
+      if (hasMessyOrders && normalized.length > 0) {
+        api.reorderCategories(normalized.map((c) => c.id)).catch(console.error);
+      }
 
       const counts: Record<number, number> = {};
       if (prodsRes?.data) {
@@ -80,15 +85,12 @@ export const CategoriesPage: React.FC = () => {
   const handleOpenAdd = () => {
     setEditingCategory(null);
     setFormName('');
-    // Automatically set next sequential position (categories.length + 1)
-    setFormSortOrder(String(categories.length + 1));
     setIsModalOpen(true);
   };
 
   const handleOpenEdit = (c: Category) => {
     setEditingCategory(c);
     setFormName(c.name);
-    setFormSortOrder(String(c.sort_order));
     setIsModalOpen(true);
   };
 
@@ -99,14 +101,16 @@ export const CategoriesPage: React.FC = () => {
     setIsSaving(true);
     try {
       if (editingCategory) {
+        // Keep category's current sort order when editing name
         await api.updateCategory(
           editingCategory.id,
           formName.trim(),
-          parseInt(formSortOrder) || 0
+          editingCategory.sort_order
         );
         toast.success('Category updated');
       } else {
-        await api.createCategory(formName.trim(), parseInt(formSortOrder) || (categories.length + 1));
+        // Append new category to the end
+        await api.createCategory(formName.trim(), categories.length + 1);
         toast.success('Category created');
       }
       setIsModalOpen(false);
@@ -159,12 +163,51 @@ export const CategoriesPage: React.FC = () => {
     toast.success(`Category "${moved.name}" moved to position #${targetIndex + 1}`);
 
     try {
-      await Promise.all(
-        updated.map((cat) => api.updateCategory(cat.id, undefined, cat.sort_order))
-      );
+      await api.reorderCategories(updated.map((cat) => cat.id));
     } catch {
       loadCategories();
       toast.error('Failed to save category order');
+    }
+  };
+
+  // Move single step up or down
+  const handleMoveOne = async (currentIndex: number, targetIndex: number) => {
+    if (targetIndex < 0 || targetIndex >= categories.length) return;
+
+    const reordered = [...categories];
+    const [moved] = reordered.splice(currentIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+
+    const updated = reordered.map((cat, i) => ({
+      ...cat,
+      sort_order: i + 1,
+    }));
+
+    setCategories(updated);
+    toast.success(`Category "${moved.name}" moved to position #${targetIndex + 1}`);
+
+    try {
+      await api.reorderCategories(updated.map((cat) => cat.id));
+    } catch {
+      loadCategories();
+      toast.error('Failed to save category order');
+    }
+  };
+
+  // Sort categories alphabetically A to Z
+  const handleSortAlphabetical = async () => {
+    const sorted = [...categories].sort((a, b) => a.name.localeCompare(b.name));
+    const updated = sorted.map((cat, i) => ({
+      ...cat,
+      sort_order: i + 1,
+    }));
+    setCategories(updated);
+    toast.success('Categories sorted alphabetically (A to Z)');
+    try {
+      await api.reorderCategories(updated.map((cat) => cat.id));
+    } catch {
+      toast.error('Failed to save category order');
+      loadCategories();
     }
   };
 
@@ -173,7 +216,10 @@ export const CategoriesPage: React.FC = () => {
     setIsDeleting(true);
     try {
       await api.deleteCategory(deletingCategory.id);
-      setCategories((prev) => prev.filter((cat) => cat.id !== deletingCategory.id));
+      const remaining = categories.filter((cat) => cat.id !== deletingCategory.id);
+      const reindexed = remaining.map((cat, i) => ({ ...cat, sort_order: i + 1 }));
+      setCategories(reindexed);
+      api.reorderCategories(reindexed.map((c) => c.id)).catch(console.error);
       toast.success(`Category "${deletingCategory.name}" deleted successfully`);
       setDeletingCategory(null);
     } catch (err: any) {
@@ -183,36 +229,16 @@ export const CategoriesPage: React.FC = () => {
     }
   };
 
-  // Quick date presets
-  const handleSetDatePreset = (preset: 'all' | 'today' | 'month') => {
-    if (preset === 'all') {
-      setDateFrom('');
-      setDateTo('');
-    } else if (preset === 'today') {
-      setDateFrom(todayStr);
-      setDateTo(todayStr);
-    } else if (preset === 'month') {
-      const now = new Date();
-      const y = now.getFullYear();
-      const m = String(now.getMonth() + 1).padStart(2, '0');
-      setDateFrom(`${y}-${m}-01`);
-      setDateTo(todayStr);
-    }
-  };
-
   // Filtered categories
   const filteredCategories = categories.filter((c) => {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       if (!c.name.toLowerCase().includes(q)) return false;
     }
-    const catDate = c.created_at ? c.created_at.split(' ')[0] : '';
-    if (dateFrom && catDate < dateFrom) return false;
-    if (dateTo && catDate > dateTo) return false;
     return true;
   });
 
-  const isFiltering = Boolean(searchQuery.trim() || dateFrom || dateTo);
+  const isFiltering = Boolean(searchQuery.trim());
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-surface-50">
@@ -220,21 +246,32 @@ export const CategoriesPage: React.FC = () => {
         title="Category Management"
         subtitle="Organize your shop products into intuitive catalog groups & custom display order"
         actions={
-          <button
-            onClick={handleOpenAdd}
-            className="btn-primary flex items-center gap-1.5 text-xs font-semibold"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Category</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSortAlphabetical}
+              className="h-8 px-3 text-xs font-semibold bg-white hover:bg-surface-50 text-surface-700 border border-surface-200 rounded-lg transition-all inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+              title="Sort categories alphabetically (A to Z)"
+            >
+              <ArrowUpDown className="w-3.5 h-3.5 text-surface-500" />
+              <span>Sort A-Z</span>
+            </button>
+            <button
+              onClick={handleOpenAdd}
+              className="btn-primary flex items-center gap-1.5 text-xs font-semibold"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Category</span>
+            </button>
+          </div>
         }
       />
 
       <div className="p-6 overflow-y-auto flex-1 w-full space-y-4">
-        {/* Date Range & Search Filter Bar */}
+        {/* Search Filter Bar */}
         <div className="card p-3 bg-white flex items-center justify-between gap-3 flex-wrap">
           {/* Search Input */}
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative flex-1 min-w-[240px] max-w-md">
             <Search className="w-4 h-4 text-surface-400 absolute left-3 top-2.5" />
             <input
               type="text"
@@ -243,97 +280,19 @@ export const CategoriesPage: React.FC = () => {
               placeholder="Search category name..."
               className="form-input pl-9 text-xs h-9"
             />
-          </div>
-
-          {/* From - To Date Range Filter (Future Dates Blocked via max={todayStr}) */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 bg-surface-50 px-3 py-1 rounded-lg border border-surface-200 h-9">
-              <Calendar className="w-3.5 h-3.5 text-primary-600 flex-shrink-0" />
-              <div className="flex items-center gap-1 text-xs">
-                <span className="text-surface-500 font-medium">From:</span>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  max={todayStr}
-                  onChange={(e) => {
-                    const newFrom = e.target.value;
-                    setDateFrom(newFrom);
-                    if (newFrom && dateTo && newFrom > dateTo) setDateTo(newFrom);
-                  }}
-                  className="bg-transparent border-0 text-xs font-mono font-semibold text-surface-800 p-0 focus:ring-0 cursor-pointer"
-                  title="Filter categories created from this date (up to today)"
-                />
-              </div>
-
-              <span className="text-surface-300 font-bold">→</span>
-
-              <div className="flex items-center gap-1 text-xs">
-                <span className="text-surface-500 font-medium">To:</span>
-                <input
-                  type="date"
-                  value={dateTo}
-                  min={dateFrom || undefined}
-                  max={todayStr}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className="bg-transparent border-0 text-xs font-mono font-semibold text-surface-800 p-0 focus:ring-0 cursor-pointer"
-                  title="Filter categories created up to this date (up to today)"
-                />
-              </div>
-            </div>
-
-            {/* Quick Date Presets */}
-            <div className="flex items-center gap-1 bg-surface-100 p-1 rounded-lg border border-surface-200 h-9">
+            {searchQuery && (
               <button
                 type="button"
-                onClick={() => handleSetDatePreset('all')}
-                className={`h-7 px-2.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                  !dateFrom && !dateTo
-                    ? 'bg-white text-primary-700 shadow-xs font-bold'
-                    : 'text-surface-600 hover:text-surface-900'
-                }`}
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-2.5 text-2xs text-surface-400 hover:text-surface-600 font-semibold cursor-pointer"
               >
-                All
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSetDatePreset('today')}
-                className={`h-7 px-2.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                  dateFrom === todayStr && dateTo === todayStr
-                    ? 'bg-white text-primary-700 shadow-xs font-bold'
-                    : 'text-surface-600 hover:text-surface-900'
-                }`}
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSetDatePreset('month')}
-                className={`h-7 px-2.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                  dateFrom.endsWith('-01') && dateTo === todayStr
-                    ? 'bg-white text-primary-700 shadow-xs font-bold'
-                    : 'text-surface-600 hover:text-surface-900'
-                }`}
-              >
-                This Month
-              </button>
-            </div>
-
-            {/* Reset Button */}
-            {isFiltering && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setDateFrom('');
-                  setDateTo('');
-                }}
-                className="btn-secondary h-9 px-2.5 text-xs flex items-center gap-1 text-surface-600 hover:text-surface-900"
-                title="Reset all filters"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reset</span>
+                Clear
               </button>
             )}
+          </div>
+
+          <div className="text-xs text-surface-500 font-medium">
+            Showing <span className="font-bold text-surface-800">{filteredCategories.length}</span> of {categories.length} categories
           </div>
         </div>
 
@@ -361,7 +320,7 @@ export const CategoriesPage: React.FC = () => {
           <div className="flex items-center gap-2">
             <Info className="w-4 h-4 text-primary-600 flex-shrink-0" />
             <span>
-              <strong>Tip:</strong> Drag the dots handle (<GripVertical className="w-3.5 h-3.5 inline text-surface-500" />) to move, or click the dots to select and click any row to place it. Position numbers update automatically (#1, #2...).
+              <strong>Tip:</strong> Drag the dots handle (<GripVertical className="w-3.5 h-3.5 inline text-surface-500" />) to move, click dots to select, or use ▲ / ▼ to place categories in exact order (#1, #2...).
             </span>
           </div>
           <span className="font-mono text-xs font-semibold text-surface-500">
@@ -379,28 +338,27 @@ export const CategoriesPage: React.FC = () => {
                   <th>Category Name</th>
                   <th className="w-32 text-center">Products</th>
                   <th className="w-28 text-center">Status</th>
-                  <th className="w-36">Created Date</th>
                   <th className="w-36 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-8 text-surface-400">
+                    <td colSpan={5} className="text-center py-8 text-surface-400">
                       <div className="spinner mx-auto mb-2" />
                       Loading categories...
                     </td>
                   </tr>
                 ) : filteredCategories.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-8 text-surface-400">
+                    <td colSpan={5} className="text-center py-8 text-surface-400">
                       {isFiltering
-                        ? 'No categories match the selected date range or search filter.'
+                        ? 'No categories match the search query.'
                         : 'No categories found. Click "Add Category" above to create one.'}
                     </td>
                   </tr>
                 ) : (
-                  filteredCategories.map((c) => {
+                  filteredCategories.map((c, catIndex) => {
                     const isDragging = draggedCatId === c.id;
                     const isDragOver = dragOverCatId === c.id && draggedCatId !== c.id;
                     const isPicked = pickedCategory?.id === c.id;
@@ -458,11 +416,21 @@ export const CategoriesPage: React.FC = () => {
                             : ''
                         }`}
                       >
-                        {/* Order / Position Drag Handle + Badge */}
+                        {/* Order / Position Drag Handle + Badge + Up/Down Arrows */}
                         <td className="font-mono text-xs">
-                          <div className="flex items-center justify-center gap-2.5">
-                            {/* Drag Grip Handle with Pointer + Click-to-Move */}
+                          <div className="flex items-center justify-center gap-1.5">
+                            {/* Drag Grip Handle with Click-to-Move */}
                             <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isFiltering) return;
+                                if (pickedCategory?.id === c.id) {
+                                  setPickedCategory(null);
+                                } else {
+                                  setPickedCategory(c);
+                                  toast.success(`Selected "${c.name}". Click any row to place it there.`);
+                                }
+                              }}
                               className={`p-1.5 rounded-lg transition-all flex items-center justify-center select-none ${
                                 isPicked
                                   ? 'bg-primary-600 text-white shadow-sm ring-2 ring-primary-400'
@@ -472,90 +440,56 @@ export const CategoriesPage: React.FC = () => {
                               }`}
                               title={
                                 isFiltering
-                                  ? 'Reset search/date filter to drag & drop'
+                                  ? 'Reset search filter to drag & drop'
                                   : isPicked
                                   ? 'Selected for moving — click any row to place here, or click to cancel'
-                                  : 'Drag dots to reorder OR click to pick up and place on another row'
+                                  : 'Drag row to move, or click dots to pick up and place on another row'
                               }
-                              onPointerDown={(e) => {
-                                if (isFiltering || e.button !== 0) return;
-                                e.preventDefault();
-                                e.stopPropagation();
-
-                                isPointerDraggingRef.current = false;
-                                pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
-                                draggedCatIdRef.current = c.id;
-                                setDraggedCatId(c.id);
-
-                                const handlePointerMove = (moveEvt: PointerEvent) => {
-                                  const dist = Math.hypot(
-                                    moveEvt.clientX - pointerStartPosRef.current.x,
-                                    moveEvt.clientY - pointerStartPosRef.current.y
-                                  );
-                                  if (dist > 4) {
-                                    isPointerDraggingRef.current = true;
-                                  }
-
-                                  if (isPointerDraggingRef.current) {
-                                    const elem = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
-                                    const row = elem?.closest('[data-category-id]');
-                                    if (row) {
-                                      const targetId = Number(row.getAttribute('data-category-id'));
-                                      if (targetId && targetId !== draggedCatIdRef.current) {
-                                        setDragOverCatId(targetId);
-                                      }
-                                    }
-                                  }
-                                };
-
-                                const handlePointerUp = (upEvt: PointerEvent) => {
-                                  window.removeEventListener('pointermove', handlePointerMove);
-                                  window.removeEventListener('pointerup', handlePointerUp);
-
-                                  const srcId = draggedCatIdRef.current;
-                                  const wasDragging = isPointerDraggingRef.current;
-                                  setDraggedCatId(null);
-                                  setDragOverCatId(null);
-
-                                  if (wasDragging && srcId !== null) {
-                                    const elem = document.elementFromPoint(upEvt.clientX, upEvt.clientY);
-                                    const row = elem?.closest('[data-category-id]');
-                                    const targetId = row ? Number(row.getAttribute('data-category-id')) : null;
-                                    if (targetId && targetId !== srcId) {
-                                      handleDrop(srcId, targetId);
-                                      return;
-                                    }
-                                  }
-
-                                  // If user simply clicked without dragging, toggle Click-to-Move
-                                  if (!wasDragging) {
-                                    if (pickedCategory?.id === c.id) {
-                                      setPickedCategory(null);
-                                    } else {
-                                      setPickedCategory(c);
-                                      toast.success(`Selected "${c.name}". Click any row to place it there.`);
-                                    }
-                                  }
-                                };
-
-                                window.addEventListener('pointermove', handlePointerMove);
-                                window.addEventListener('pointerup', handlePointerUp);
-                              }}
                             >
                               <GripVertical className="w-4 h-4 pointer-events-none" />
                             </div>
 
                             {/* Sequential Order Number Badge */}
                             <span
-                              className={`inline-flex items-center justify-center font-mono font-bold text-xs px-2.5 py-1 rounded-md border min-w-[42px] transition-colors ${
+                              className={`inline-flex items-center justify-center font-mono font-bold text-xs px-2 py-1 rounded-md border min-w-[38px] transition-colors ${
                                 isPicked
                                   ? 'bg-primary-600 text-white border-primary-700 shadow-sm'
                                   : 'bg-surface-100 text-surface-900 border-surface-300 shadow-2xs'
                               }`}
-                              title={`Display sequence order #${c.sort_order}`}
+                              title={`Display position #${c.sort_order}`}
                             >
                               #{c.sort_order}
                             </span>
+
+                            {/* Up / Down Arrow Step Buttons */}
+                            {!isFiltering && (
+                              <div className="flex flex-col -space-y-1">
+                                <button
+                                  type="button"
+                                  disabled={catIndex === 0}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveOne(catIndex, catIndex - 1);
+                                  }}
+                                  className="p-0.5 text-surface-400 hover:text-primary-700 hover:bg-surface-200 rounded disabled:opacity-15 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                                  title="Move up"
+                                >
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={catIndex === categories.length - 1}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleMoveOne(catIndex, catIndex + 1);
+                                  }}
+                                  className="p-0.5 text-surface-400 hover:text-primary-700 hover:bg-surface-200 rounded disabled:opacity-15 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                                  title="Move down"
+                                >
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </td>
 
@@ -584,11 +518,6 @@ export const CategoriesPage: React.FC = () => {
                           ) : (
                             <span className="badge badge-danger">Inactive</span>
                           )}
-                        </td>
-
-                        {/* Created Date */}
-                        <td className="text-xs text-surface-600 font-mono font-medium">
-                          {c.created_at ? c.created_at.split(' ')[0] : '—'}
                         </td>
 
                         {/* Actions */}
@@ -661,20 +590,6 @@ export const CategoriesPage: React.FC = () => {
               required
               autoFocus
             />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Display Sort Order</label>
-            <input
-              type="number"
-              min="1"
-              value={formSortOrder}
-              onChange={(e) => setFormSortOrder(e.target.value)}
-              className="form-input font-mono"
-            />
-            <p className="text-2xs text-surface-500 mt-1">
-              Position number in the category list.
-            </p>
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-surface-100">

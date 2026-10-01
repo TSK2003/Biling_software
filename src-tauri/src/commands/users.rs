@@ -17,10 +17,12 @@ pub fn parse_user_permissions(role: &str, permissions_json: Option<String>) -> V
             "billing".into(), "bills".into(), "dashboard".into(),
             "products".into(), "categories".into(), "reports".into(),
             "backup".into(), "users".into(), "settings".into(),
+            "expenses".into(),
         ],
         "manager" => vec![
             "billing".into(), "bills".into(), "dashboard".into(),
             "products".into(), "categories".into(), "reports".into(),
+            "expenses".into(),
         ],
         "inventory_staff" => vec![
             "products".into(), "categories".into(), "dashboard".into(),
@@ -28,23 +30,26 @@ pub fn parse_user_permissions(role: &str, permissions_json: Option<String>) -> V
         _ => vec![
             "billing".into(), "bills".into(), "dashboard".into(),
             "products".into(), "categories".into(), "reports".into(),
-        ], // cashier / staff default: full POS + catalog + dashboard + reports
+            "expenses".into(),
+        ], // cashier / staff default: full POS + catalog + dashboard + reports + expenses
     }
 }
 
 #[tauri::command]
 pub fn get_users(state: State<'_, AppState>) -> Result<Vec<User>, String> {
+    // Backend authorization: only users with 'users' screen access or admin
+    crate::commands::auth::require_screen_access("users")?;
+    
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
     
     let mut stmt = db.conn.prepare(
-        "SELECT id, username, display_name, role, is_active, max_discount_pct, plain_password, permissions_json, created_at, updated_at
+        "SELECT id, username, display_name, role, is_active, max_discount_pct, permissions_json, created_at, updated_at
          FROM users ORDER BY role ASC, display_name ASC"
     ).map_err(|e| format!("Query error: {}", e))?;
     
     let users: Vec<User> = stmt.query_map([], |row| {
         let role: String = row.get(3)?;
-        let plain_password: Option<String> = row.get(6).ok();
-        let permissions_json: Option<String> = row.get(7).ok();
+        let permissions_json: Option<String> = row.get(6).ok();
         let permissions = parse_user_permissions(&role, permissions_json);
         
         Ok(User {
@@ -54,10 +59,9 @@ pub fn get_users(state: State<'_, AppState>) -> Result<Vec<User>, String> {
             role,
             is_active: row.get::<_, i32>(4)? == 1,
             max_discount_pct: row.get(5)?,
-            plain_password,
             permissions,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
         })
     }).map_err(|e| format!("Query error: {}", e))?
     .filter_map(|r| r.ok())
@@ -76,6 +80,9 @@ pub fn create_user(
     permissions: Option<Vec<String>>,
     max_discount_pct: Option<i32>,
 ) -> Result<User, String> {
+    // Backend authorization: only admins can create users
+    crate::commands::auth::require_admin()?;
+    
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
     
     let username = username.trim().to_lowercase();
@@ -118,9 +125,9 @@ pub fn create_user(
     let permissions_json = serde_json::to_string(&final_permissions).unwrap_or_else(|_| "[]".to_string());
     
     db.conn.execute(
-        "INSERT INTO users (username, display_name, password_hash, plain_password, permissions_json, role, max_discount_pct) 
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![username, display_name, hash, password, permissions_json, role, max_disc],
+        "INSERT INTO users (username, display_name, password_hash, permissions_json, role, max_discount_pct) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![username, display_name, hash, permissions_json, role, max_disc],
     ).map_err(|e| {
         if e.to_string().contains("UNIQUE") {
             "Username already exists".to_string()
@@ -143,7 +150,6 @@ pub fn create_user(
         role,
         is_active: true,
         max_discount_pct: max_disc,
-        plain_password: Some(password),
         permissions: final_permissions,
         created_at: String::new(),
         updated_at: String::new(),
@@ -161,6 +167,9 @@ pub fn update_user(
     new_password: Option<String>,
     permissions: Option<Vec<String>>,
 ) -> Result<(), String> {
+    // Backend authorization: only admins can modify users
+    crate::commands::auth::require_admin()?;
+    
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
     
     if let Some(ref name) = display_name {
@@ -194,7 +203,7 @@ pub fn update_user(
             let salt = SaltString::generate(&mut OsRng);
             let hash = Argon2::default().hash_password(p.as_bytes(), &salt)
                 .map_err(|e| format!("Password hashing failed: {}", e))?.to_string();
-            db.conn.execute("UPDATE users SET password_hash = ?1, plain_password = ?2, updated_at = datetime('now') WHERE id = ?3", rusqlite::params![hash, p, id])
+            db.conn.execute("UPDATE users SET password_hash = ?1, plain_password = NULL, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![hash, id])
                 .map_err(|e| format!("Update password failed: {}", e))?;
         }
     }
@@ -209,6 +218,9 @@ pub fn update_user(
 
 #[tauri::command]
 pub fn delete_user(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    // Backend authorization: only admins can delete users
+    crate::commands::auth::require_admin()?;
+    
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
     
     // Prevent deleting the last admin

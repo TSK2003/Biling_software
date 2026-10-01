@@ -11,3 +11,5 @@ pub mod backup;
 pub mod import;
 pub mod licensing;
 pub mod network;
+pub mod expenses;
+pub mod printer;

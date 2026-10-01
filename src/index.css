@@ -181,7 +181,15 @@
   }
 
   .form-select {
-    @apply form-input appearance-none cursor-pointer pr-8;
+    @apply form-input appearance-none cursor-pointer pr-9 rounded-xl border-surface-300 bg-white text-surface-800;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.65rem center;
+    background-repeat: no-repeat;
+    background-size: 1.25em 1.25em;
+  }
+
+  .form-select option {
+    @apply py-2 px-3 bg-white text-surface-800;
   }
 
   .form-checkbox {
@@ -274,26 +282,26 @@
     @apply p-6 overflow-y-auto flex-1;
   }
 
-  /* Product card (for billing screen) — large & touch-friendly */
+  /* Product card (for billing screen) — optimized for 5-column layout */
   .product-card {
-    @apply card p-3.5 cursor-pointer hover:shadow-lg hover:border-primary-500 
-           transition-all duration-150 active:scale-[0.98] bg-white rounded-2xl border-2 border-surface-200/80;
+    @apply card p-2.5 cursor-pointer hover:shadow-md hover:border-primary-500 
+           transition-all duration-150 active:scale-[0.98] bg-white rounded-xl border border-surface-200/90;
   }
 
   .product-card-image {
-    @apply w-full aspect-[4/3] rounded-xl bg-surface-100 object-cover mb-2.5;
+    @apply w-full aspect-[4/3] rounded-lg bg-surface-100 object-cover mb-1.5;
   }
 
   .product-card-name {
-    @apply text-base font-bold text-surface-900 truncate leading-snug;
+    @apply text-sm sm:text-base font-extrabold text-surface-900 leading-snug line-clamp-2 min-h-[2.6rem];
   }
 
   .product-card-price {
-    @apply text-lg font-extrabold text-primary-700 font-mono;
+    @apply text-base sm:text-lg font-black text-primary-700 font-mono tracking-tight;
   }
 
   .product-card-code {
-    @apply text-xs font-mono text-surface-500 truncate tracking-wide font-medium;
+    @apply text-xs font-mono text-surface-500 truncate tracking-wide font-semibold;
   }
 
   /* Cart item */
@@ -303,16 +311,16 @@
 
   /* Quantity controls — enlarged for fast cashier counter tapping */
   .qty-control {
-    @apply inline-flex items-center border-2 border-surface-300 rounded-lg overflow-hidden;
+    @apply inline-flex items-center border-2 border-surface-300 rounded-lg overflow-hidden flex-shrink-0;
   }
 
   .qty-btn {
-    @apply w-10 h-10 flex items-center justify-center text-surface-700 
+    @apply w-10 h-10 flex items-center justify-center text-surface-700 flex-shrink-0
            hover:bg-primary-50 hover:text-primary-700 active:bg-primary-100 transition-colors;
   }
 
   .qty-input {
-    @apply w-14 h-10 text-center text-base font-bold font-mono border-x-2 border-surface-300 
+    @apply w-14 h-10 text-center text-base font-bold font-mono border-x-2 border-surface-300 flex-shrink-0
            focus:outline-none focus:bg-primary-50;
   }
 
@@ -410,14 +418,29 @@
     color: #000000 !important;
   }
 
-  /* Thermal 80mm (3 inch roll) */
-  #printable-receipt.print-thermal80 {
-    position: fixed !important;
-    left: 0 !important;
-    top: 0 !important;
-    width: 80mm !important;
-    max-width: 80mm !important;
-    margin: 0 !important;
+  /* Thermal 80mm (3 inch roll) & Continuous 3-inch */
+  #printable-receipt.print-thermal80,
+  #printable-receipt.print-thermal72,
+  #printable-receipt.print-continuous {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 76mm !important;
+    max-width: 76mm !important;
+    margin: 0 auto !important;
+    padding: 2mm 3mm !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Thermal 100mm (4 inch roll) */
+  #printable-receipt.print-thermal100 {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 96mm !important;
+    max-width: 96mm !important;
+    margin: 0 auto !important;
     padding: 2mm 3mm !important;
     border: none !important;
     box-shadow: none !important;
@@ -425,24 +448,37 @@
 
   /* Thermal 58mm (2 inch roll) */
   #printable-receipt.print-thermal58 {
-    position: fixed !important;
-    left: 0 !important;
-    top: 0 !important;
-    width: 58mm !important;
-    max-width: 58mm !important;
-    margin: 0 !important;
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 54mm !important;
+    max-width: 54mm !important;
+    margin: 0 auto !important;
     padding: 1.5mm 2mm !important;
     border: none !important;
     box-shadow: none !important;
   }
 
-  /* Standard A4 Sheet */
-  #printable-receipt.print-a4 {
+  /* Standard A4 & US Letter Sheet */
+  #printable-receipt.print-a4,
+  #printable-receipt.print-letter {
     position: static !important;
     width: 100% !important;
     max-width: 195mm !important;
     margin: 0 auto !important;
     padding: 6mm !important;
+    border: 1px solid #0f172a !important;
+    box-shadow: none !important;
+  }
+
+  /* Standard A5 & B5 Sheet */
+  #printable-receipt.print-a5,
+  #printable-receipt.print-b5 {
+    position: static !important;
+    width: 100% !important;
+    max-width: 142mm !important;
+    margin: 0 auto !important;
+    padding: 4mm !important;
     border: 1px solid #0f172a !important;
     box-shadow: none !important;
   }

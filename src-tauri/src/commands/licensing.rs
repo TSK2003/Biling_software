@@ -43,6 +43,26 @@ pub fn activate_license(state: State<'_, AppState>, drive_letter: String) -> Res
     let activation_file = db.activation_dir().join("activation.dat");
     let status = licensing_service::activate_device(&usb_info.license, &activation_file)?;
 
+    // Consuming single-use key from USB Pen Drive:
+    // Delete the license file so it cannot be reused on any other PC!
+    let candidate_paths = [
+        drive_path.join("BILLING_KEY").join("license.bin"),
+        drive_path.join("billing_key").join("license.bin"),
+        drive_path.join("AESCION_KEY").join("license.bin"),
+        drive_path.join("aescion_key").join("license.bin"),
+        drive_path.join("license.bin"),
+    ];
+    for p in &candidate_paths {
+        if p.exists() {
+            let _ = std::fs::remove_file(p);
+            if let Some(parent) = p.parent() {
+                if parent != drive_path {
+                    let _ = std::fs::remove_dir(parent);
+                }
+            }
+        }
+    }
+
     // Also persist record into SQLite for settings display convenience
     let features_json = serde_json::to_string(&usb_info.license.features).unwrap_or_else(|_| "[]".to_string());
     let _ = db.conn.execute(
@@ -65,10 +85,38 @@ pub fn activate_license(state: State<'_, AppState>, drive_letter: String) -> Res
     // Audit log
     let _ = db.conn.execute(
         "INSERT INTO audit_logs (action, entity_type, details_json) VALUES ('activate', 'license', ?1)",
-        rusqlite::params![format!("{{\"shop\":\"{}\",\"license_id\":\"{}\"}}", usb_info.license.shop_name, usb_info.license.license_id)],
+        rusqlite::params![format!("{{\"shop\":\"{}\",\"license_id\":\"{}\",\"consumed\":true}}", usb_info.license.shop_name, usb_info.license.license_id)],
     );
 
     Ok(status)
+}
+
+/// Write a fresh security key onto a USB Pen Drive (Admin only)
+#[tauri::command]
+pub fn create_usb_security_key(state: State<'_, AppState>, drive_letter: String, shop_name: Option<String>) -> Result<String, String> {
+    crate::commands::auth::require_admin()?;
+    let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+    let shop = shop_name.unwrap_or_else(|| {
+        db.conn.query_row(
+            "SELECT value FROM settings WHERE key = 'shop_name'",
+            [],
+            |r| r.get(0),
+        ).unwrap_or_else(|_| "Billing Software".to_string())
+    });
+
+    let drive_path = Path::new(&drive_letter);
+    if !drive_path.exists() {
+        return Err("Selected drive path does not exist or was unplugged.".to_string());
+    }
+
+    let license_id = licensing_service::write_usb_security_key(drive_path, &shop, "perpetual")?;
+
+    let _ = db.conn.execute(
+        "INSERT INTO audit_logs (action, entity_type, details_json) VALUES ('create_usb_key', 'license', ?1)",
+        rusqlite::params![format!("{{\"drive\":\"{}\",\"license_id\":\"{}\"}}", drive_letter, license_id)],
+    );
+
+    Ok(license_id)
 }
 
 /// Activate license using a manual License Code / Activation Key (e.g. AESCION-PRO-2026)

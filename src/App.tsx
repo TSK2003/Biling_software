@@ -1,11 +1,12 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { AuthProvider } from './contexts/AuthContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LicenseProvider, useLicense } from './contexts/LicenseContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { NetworkProvider } from './contexts/NetworkContext';
-import { isClientMode } from './lib/ipc';
+import { api, isClientMode } from './lib/ipc';
+import type { ScreenPermission } from './types';
 
 import { Layout } from './components/Layout';
 import { LoginPage } from './features/auth/LoginPage';
@@ -18,10 +19,62 @@ import { CategoriesPage } from './features/categories/CategoriesPage';
 import { ReportsPage } from './features/reports/ReportsPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { UsersPage } from './features/users/UsersPage';
-import { BackupPage } from './features/backup/BackupPage';
+import { ExpensesPage } from './features/expenses/ExpensesPage';
+
+const ProtectedRoute: React.FC<{
+  permission?: ScreenPermission;
+  adminOnly?: boolean;
+  children: React.ReactElement;
+}> = ({ permission, adminOnly, children }) => {
+  const { user, isAdmin, canAccess, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="h-full w-full flex items-center justify-center">
+        <div className="spinner" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (adminOnly && !isAdmin) {
+    return <Navigate to="/billing" replace />;
+  }
+
+  if (permission && !canAccess(permission)) {
+    return <Navigate to="/billing" replace />;
+  }
+
+  return children;
+};
 
 const AppContent: React.FC = () => {
   const { isActivated, isLoading } = useLicense();
+
+  // Automatic Daily Backup: Runs silently on software launch and continues daily
+  React.useEffect(() => {
+    if (isActivated && !isClientMode()) {
+      api.checkDailyBackup()
+        .then((result) => {
+          if (result) {
+            console.log('[Daily Auto-Backup] Fresh daily snapshot recorded:', result.backup_path);
+          }
+        })
+        .catch((err) => {
+          console.warn('[Daily Auto-Backup] Check error:', err);
+        });
+
+      // Periodically check every 30 minutes in case the application runs overnight across midnight
+      const interval = setInterval(() => {
+        api.checkDailyBackup().catch(() => {});
+      }, 30 * 60 * 1000);
+
+      return () => clearInterval(interval);
+    }
+  }, [isActivated]);
 
   if (isLoading) {
     return (
@@ -46,15 +99,82 @@ const AppContent: React.FC = () => {
 
       <Route element={<Layout />}>
         <Route path="/" element={<Navigate to="/billing" replace />} />
-        <Route path="/billing" element={<BillingPage />} />
-        <Route path="/bills" element={<BillsPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/products" element={<ProductsPage />} />
-        <Route path="/categories" element={<CategoriesPage />} />
-        <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/users" element={<UsersPage />} />
-        <Route path="/backup" element={<BackupPage />} />
+        <Route
+          path="/billing"
+          element={
+            <ProtectedRoute permission="billing">
+              <BillingPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/bills"
+          element={
+            <ProtectedRoute permission="bills">
+              <BillsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/expenses"
+          element={
+            <ProtectedRoute permission="expenses">
+              <ExpensesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute permission="dashboard">
+              <DashboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/products"
+          element={
+            <ProtectedRoute permission="products">
+              <ProductsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/categories"
+          element={
+            <ProtectedRoute permission="categories">
+              <CategoriesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/reports"
+          element={
+            <ProtectedRoute permission="reports">
+              <ReportsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute adminOnly>
+              <SettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute adminOnly>
+              <UsersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/backup"
+          element={<Navigate to="/settings?tab=backup" replace />}
+        />
       </Route>
 
       {/* Catch-all fallback */}

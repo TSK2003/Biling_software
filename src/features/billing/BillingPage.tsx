@@ -12,6 +12,10 @@ import {
   RotateCcw,
   PackagePlus,
   X,
+  AlertCircle,
+  AlertTriangle,
+  Ban,
+  Sparkles,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
 import { useAuth } from '../../contexts/AuthContext';
@@ -19,6 +23,7 @@ import { useSettings } from '../../contexts/SettingsContext';
 import { formatCurrency, paiseToRupeesStr, rupeesToPaise } from '../../lib/format';
 import { Modal } from '../../components/Modal';
 import { Header } from '../../components/Header';
+import { CustomSelect } from '../../components/CustomSelect';
 import { ReceiptPrintModal, ReceiptBillData } from '../../components/ReceiptPrintModal';
 import type { BillingProduct, Category, CartItem, CompleteBillResponse, DraftBill } from '../../types';
 import toast from 'react-hot-toast';
@@ -71,8 +76,8 @@ function loadTabsFromStorage(): { tabs: BillTab[]; activeId: string } {
 // =================================================================
 
 export const BillingPage: React.FC = () => {
-  const { user } = useAuth();
-  const { gstEnabled, defaultPaymentMethod } = useSettings();
+  const { user, isAdmin } = useAuth();
+  const { gstEnabled, defaultPaymentMethod, currencySymbol } = useSettings();
 
   // ===================== Tab State =====================
   const [_initTabs] = useState(loadTabsFromStorage);
@@ -217,6 +222,8 @@ export const BillingPage: React.FC = () => {
   const [customItemName, setCustomItemName] = useState('');
   const [customItemPrice, setCustomItemPrice] = useState('');
   const [customItemQty, setCustomItemQty] = useState('1');
+  const [customItemGstEnabled, setCustomItemGstEnabled] = useState(false);
+  const [customItemGstPct, setCustomItemGstPct] = useState('5');
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -242,6 +249,18 @@ export const BillingPage: React.FC = () => {
         if (typeof nextNum === 'number') {
           setNextBillNumber(nextNum);
         }
+
+        // Enrich any existing tab carts with image_path from prods if missing
+        setTabs((prevTabs) =>
+          prevTabs.map((tab) => ({
+            ...tab,
+            cart: tab.cart.map((ci) => {
+              if (ci.image_path) return ci;
+              const match = prods.find((p) => p.id === ci.product_id);
+              return match?.image_path ? { ...ci, image_path: match.image_path } : ci;
+            }),
+          }))
+        );
 
         // Only check backend draft if ALL tabs are empty (fresh session)
         const hasExistingItems = tabs.some((t) => t.cart.length > 0);
@@ -369,9 +388,21 @@ export const BillingPage: React.FC = () => {
   // ========= Cart Manipulations (tab-scoped) =========
   const addToCart = useCallback(
     (product: BillingProduct) => {
+      const isRestockable = !!product.is_restockable;
+      const availableStock = product.current_stock ?? 0;
+
+      if (isRestockable && availableStock <= 0) {
+        toast.error(`"${product.name}" is Out of Stock (0 units available)`);
+        return;
+      }
+
       setCartForTab((prev) => {
         const existing = prev.find((item) => item.product_id === product.id);
         if (existing) {
+          if (isRestockable && existing.quantity + 1 > availableStock) {
+            toast.error(`Cannot add more. Only ${availableStock} units of "${product.name}" available in stock.`);
+            return prev;
+          }
           return prev.map((item) =>
             item.product_id === product.id
               ? { ...item, quantity: item.quantity + 1 }
@@ -412,6 +443,7 @@ export const BillingPage: React.FC = () => {
 
     const qty = parseInt(customItemQty) || 1;
     const customId = -(Date.now() + Math.floor(Math.random() * 10000)); // Unique negative ID to distinguish from real products
+    const gstPctX100 = customItemGstEnabled ? Math.round(parseFloat(customItemGstPct || '0') * 100) : 0;
 
     setCartForTab((prev) => [
       ...prev,
@@ -423,8 +455,8 @@ export const BillingPage: React.FC = () => {
         image_path: null,
         unit_price_paise: pricePaise,
         quantity: qty,
-        gst_enabled: false,
-        gst_percentage_x100: 0,
+        gst_enabled: customItemGstEnabled,
+        gst_percentage_x100: gstPctX100,
       },
     ]);
 
@@ -433,12 +465,22 @@ export const BillingPage: React.FC = () => {
     setCustomItemName('');
     setCustomItemPrice('');
     setCustomItemQty('1');
+    setCustomItemGstEnabled(false);
+    setCustomItemGstPct('5');
   };
 
   const updateQuantity = (productId: number, qty: number) => {
     if (qty <= 0) {
       removeFromCart(productId);
       return;
+    }
+    const catProd = products.find((p) => p.id === productId);
+    if (catProd && catProd.is_restockable) {
+      const availableStock = catProd.current_stock ?? 0;
+      if (qty > availableStock) {
+        toast.error(`Only ${availableStock} units in stock for "${catProd.name}"`);
+        qty = availableStock;
+      }
     }
     setCartForTab((prev) =>
       prev.map((item) =>
@@ -504,9 +546,28 @@ export const BillingPage: React.FC = () => {
     };
   }, [cart, discountType, discountValue, gstEnabled]);
 
+  // ========= Stock Validation for Cart Items =========
+  const outOfStockCartItems = useMemo(() => {
+    return cart.filter((item) => {
+      const p = products.find((prod) => prod.id === item.product_id);
+      if (p && p.is_restockable) {
+        const avail = p.current_stock ?? 0;
+        return avail <= 0 || item.quantity > avail;
+      }
+      return false;
+    });
+  }, [cart, products]);
+
+  const hasOutOfStockItems = outOfStockCartItems.length > 0;
+
   // ========= Payment Handling =========
   const handleOpenPayment = () => {
     if (cart.length === 0) return;
+    if (hasOutOfStockItems) {
+      const names = outOfStockCartItems.map((i) => `"${i.product_name}"`).join(', ');
+      toast.error(`Cannot proceed: Stock is zero or exceeded for ${names}. Please adjust cart before payment.`);
+      return;
+    }
     setPaymentMethod((defaultPaymentMethod as any) || 'cash');
     setTenderedCash(paiseToRupeesStr(calculations.grandTotalPaise));
     setSplitCash(
@@ -523,6 +584,11 @@ export const BillingPage: React.FC = () => {
 
   const handleCompleteBill = async () => {
     if (!user?.id || cart.length === 0) return;
+    if (hasOutOfStockItems) {
+      const names = outOfStockCartItems.map((i) => `"${i.product_name}"`).join(', ');
+      toast.error(`Cannot complete bill: Stock is zero or exceeded for ${names}. Please remove them to proceed.`);
+      return;
+    }
 
     let cashPaise = 0;
     let cardPaise = 0;
@@ -562,6 +628,7 @@ export const BillingPage: React.FC = () => {
       });
 
       const billData: ReceiptBillData = {
+        billId: response.bill_id,
         billNumber: response.bill_number,
         billUuid: response.bill_uuid,
         businessDate: response.business_date,
@@ -575,8 +642,8 @@ export const BillingPage: React.FC = () => {
         gstTotalPaise: calculations.gstTotalPaise,
         grandTotalPaise: calculations.grandTotalPaise,
         paymentMethod,
-        tenderedCashPaise: paymentMethod === 'cash' ? cashPaise : 0,
-        changeDuePaise: response.change_due_paise || 0,
+        tenderedCashPaise: paymentMethod === 'cash' || paymentMethod === 'upi_cash' ? cashPaise : 0,
+        changeDuePaise: response.change_due_paise ?? Math.max(0, cashPaise - calculations.grandTotalPaise),
       };
 
       setCompletedBill(response);
@@ -608,6 +675,7 @@ export const BillingPage: React.FC = () => {
 
       if (user?.id) api.deleteDraft(user.id);
       api.getNextBillNumber().then((n) => setNextBillNumber(n)).catch(() => setNextBillNumber((p) => p + 1));
+      api.getBillingProducts(selectedCategory || undefined, searchQuery.trim() || undefined).then(setProducts).catch(console.error);
       toast.success(`Bill #${response.bill_number} generated successfully!`);
     } catch (err: any) {
       toast.error(typeof err === 'string' ? err : 'Failed to complete bill');
@@ -619,9 +687,14 @@ export const BillingPage: React.FC = () => {
   // ========= Draft Recovery Handlers =========
   const handleResumeDraft = () => {
     if (recoveredDraft) {
+      const enrichedCart = recoveredDraft.cart_items.map((ci) => {
+        if (ci.image_path) return ci;
+        const match = products.find((p) => p.id === ci.product_id);
+        return match?.image_path ? { ...ci, image_path: match.image_path } : ci;
+      });
       updateActiveTab((tab) => ({
         ...tab,
-        cart: recoveredDraft.cart_items,
+        cart: enrichedCart,
         discountType: recoveredDraft.discount?.discount_type || 'none',
         discountValue: recoveredDraft.discount?.discount_value || 0,
       }));
@@ -645,17 +718,15 @@ export const BillingPage: React.FC = () => {
         title="POS Billing Terminal"
         subtitle="Quick order entry and instant checkout"
         actions={
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono font-bold text-primary-700 bg-primary-50 px-2.5 py-1.5 rounded-lg border border-primary-200 shadow-2xs">
+          <div className="flex items-center gap-1.5 lg:gap-2">
+            <span className="text-xs font-mono font-bold text-primary-700 bg-primary-50 px-2.5 py-1.5 rounded-lg border border-primary-200 shadow-2xs whitespace-nowrap">
               Bill #{activeTabIndex + 1}
             </span>
-            <span className="text-xs font-mono text-surface-600 bg-surface-100 px-2.5 py-1.5 rounded-lg border border-surface-200">
-              Next Invoice #{nextBillNumber}
+            <span className="text-xs font-mono text-surface-600 bg-surface-100 px-2.5 py-1.5 rounded-lg border border-surface-200 whitespace-nowrap hidden sm:inline-block">
+              Inv #{nextBillNumber}
             </span>
-            <span className="text-sm font-mono text-surface-600 bg-surface-100 px-3 py-1.5 rounded-lg border border-surface-200">
-              Shortcuts: <kbd className="font-bold text-surface-800">F2</kbd>{' '}
-              Search | <kbd className="font-bold text-surface-800">F4</kbd> Pay
-              | <kbd className="font-bold text-surface-800">Ctrl+N</kbd> New Tab
+            <span className="text-xs font-mono text-surface-600 bg-surface-100 px-2.5 py-1.5 rounded-lg border border-surface-200 whitespace-nowrap hidden 2xl:inline-block">
+              <kbd className="font-bold text-surface-800">F2</kbd> Search • <kbd className="font-bold text-surface-800">F4</kbd> Pay • <kbd className="font-bold text-surface-800">Ctrl+N</kbd> New
             </span>
           </div>
         }
@@ -689,10 +760,18 @@ export const BillingPage: React.FC = () => {
                         ) || (products.length === 1 ? products[0] : null);
 
                       if (matched) {
+                        if (matched.is_restockable && (matched.current_stock ?? 0) <= 0) {
+                          toast.error(`"${matched.name}" is Out of Stock (0 available)`);
+                          return;
+                        }
                         addToCart(matched);
                         setSearchQuery('');
                         toast.success(`Added ${matched.name}`);
                       } else if (products.length > 1) {
+                        if (products[0].is_restockable && (products[0].current_stock ?? 0) <= 0) {
+                          toast.error(`"${products[0].name}" is Out of Stock (0 available)`);
+                          return;
+                        }
                         addToCart(products[0]);
                         setSearchQuery('');
                         toast.success(`Added ${products[0].name}`);
@@ -761,47 +840,103 @@ export const BillingPage: React.FC = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(175px,1fr))] gap-3.5">
-                {products.map((product) => (
-                  <div
-                    key={product.id}
-                    onClick={() => addToCart(product)}
-                    className="product-card flex flex-col justify-between group"
-                    title={`Click to add ${product.name} to cart`}
-                  >
-                    <div>
-                      {/* Product Image preview or initial fallback */}
-                      <div className="w-full aspect-[4/3] rounded-xl bg-surface-100 mb-2.5 flex items-center justify-center text-primary-600 font-bold text-2xl overflow-hidden group-hover:bg-primary-50 transition-colors">
-                        {product.image_path ? (
-                          <img
-                            src={product.image_path}
-                            alt={product.name}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                          />
-                        ) : (
-                          product.name.charAt(0).toUpperCase()
-                        )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+                {products.map((product) => {
+                  const isRestockable = !!product.is_restockable;
+                  const currentStock = product.current_stock ?? 0;
+                  const isOutOfStock = isRestockable && currentStock <= 0;
+                  const isRedAlert = isRestockable && currentStock > 0 && currentStock <= 2;
+                  const isYellowAlert = isRestockable && currentStock >= 3 && currentStock <= 5;
+
+                  let borderStyle = '';
+                  if (isOutOfStock) {
+                    borderStyle = 'border-2 border-red-300 bg-surface-100/70 opacity-60 grayscale-[30%] cursor-not-allowed hover:border-red-400';
+                  } else if (isRedAlert) {
+                    borderStyle = 'border-2 border-red-500 bg-red-50/20 shadow-xs shadow-red-200/50 hover:border-red-600';
+                  } else if (isYellowAlert) {
+                    borderStyle = 'border-2 border-amber-400 bg-amber-50/20 shadow-xs shadow-amber-200/50 hover:border-amber-500';
+                  }
+
+                  return (
+                    <div
+                      key={product.id}
+                      onClick={() => {
+                        if (isOutOfStock) {
+                          toast.error(`"${product.name}" is Out of Stock (0 available)`);
+                          return;
+                        }
+                        addToCart(product);
+                      }}
+                      className={`product-card flex flex-col justify-between group relative transition-all ${borderStyle}`}
+                      title={
+                        isRestockable
+                          ? isOutOfStock
+                            ? `"${product.name}" is Out of Stock`
+                            : `Click to add ${product.name} to cart (Stock: ${currentStock})`
+                          : `Click to add ${product.name} to cart`
+                      }
+                    >
+                      <div>
+                        {/* Product Image preview or initial fallback */}
+                        <div className="relative w-full aspect-[4/3] rounded-lg bg-surface-100 mb-2 flex items-center justify-center text-primary-600 font-black text-3xl overflow-hidden group-hover:bg-primary-50 transition-colors">
+                          {product.image_path ? (
+                            <img
+                              src={product.image_path}
+                              alt={product.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            />
+                          ) : (
+                            product.name.charAt(0).toUpperCase()
+                          )}
+
+                          {/* Dynamic Color Badges for Restockable Products */}
+                          {isOutOfStock && (
+                            <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded-md font-mono font-bold text-xs bg-red-700 text-white shadow-md">
+                              <Ban className="w-3 h-3 text-white flex-shrink-0" />
+                              <span>Out of Stock</span>
+                            </div>
+                          )}
+                          {isRedAlert && (
+                            <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded-md font-mono font-bold text-xs bg-red-600 text-white shadow-md animate-pulse">
+                              <AlertCircle className="w-3 h-3 text-white flex-shrink-0" />
+                              <span>{currentStock} Left</span>
+                            </div>
+                          )}
+                          {isYellowAlert && (
+                            <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded-md font-mono font-bold text-xs bg-amber-500 text-white shadow-md">
+                              <AlertTriangle className="w-3 h-3 text-white flex-shrink-0" />
+                              <span>{currentStock} Left</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="product-card-name" title={product.name}>
+                          {product.name}
+                        </div>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <div
+                            className="product-card-code"
+                            title={product.product_code}
+                          >
+                            {product.product_code}
+                          </div>
+                          {isRestockable && currentStock > 5 && (
+                            <span className="text-xs font-mono font-bold text-surface-600">
+                              {currentStock} in stock
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="product-card-name" title={product.name}>
-                        {product.name}
-                      </div>
-                      <div
-                        className="product-card-code mt-0.5"
-                        title={product.product_code}
-                      >
-                        {product.product_code}
+                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-surface-100 gap-1.5 min-w-0">
+                        <span className="product-card-price truncate tabular-nums min-w-0" title={formatCurrency(product.selling_price_paise)}>
+                          {formatCurrency(product.selling_price_paise)}
+                        </span>
+                        <span className="text-xs sm:text-sm bg-primary-50 group-hover:bg-primary-600 group-hover:text-white text-primary-700 px-2.5 py-1 rounded-lg font-extrabold transition-all shrink-0 whitespace-nowrap shadow-2xs group-hover:shadow-xs">
+                          +Add
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-surface-100">
-                      <span className="product-card-price">
-                        {formatCurrency(product.selling_price_paise)}
-                      </span>
-                      <span className="text-xs bg-primary-50 group-hover:bg-primary-600 group-hover:text-white text-primary-700 px-3 py-1 rounded-md font-bold transition-colors">
-                        +Add
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -910,97 +1045,148 @@ export const BillingPage: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-1.5">
-                {cart.map((item) => (
-                  <div
-                    key={item.product_id}
-                    className={`p-2.5 rounded border flex flex-col gap-1.5 ${
-                      item.product_code === 'CUSTOM'
-                        ? 'bg-amber-50/50 border-amber-200'
-                        : 'bg-surface-50 border-surface-200'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2 justify-between">
-                      {/* Optional Cart Item Thumbnail */}
-                      <div className="w-12 h-12 rounded-lg bg-surface-100 border border-surface-200 flex items-center justify-center overflow-hidden flex-shrink-0">
-                        {item.image_path ? (
-                          <img
-                            src={item.image_path}
-                            alt={item.product_name}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="text-base font-bold text-surface-400">
-                            {item.product_code === 'CUSTOM'
-                              ? '✦'
-                              : item.product_name.charAt(0).toUpperCase()}
-                          </div>
-                        )}
-                      </div>
+                {cart.map((item) => {
+                  const catProd = products.find((p) => p.id === item.product_id);
+                  const itemImage = item.image_path || catProd?.image_path;
+                  const isRestockable = !!catProd?.is_restockable;
+                  const avail = isRestockable ? (catProd?.current_stock ?? 0) : undefined;
+                  const isZeroStock = isRestockable && avail !== undefined && avail <= 0;
+                  const isExceeded = isRestockable && avail !== undefined && item.quantity > avail;
+                  const hasStockIssue = isZeroStock || isExceeded;
+                  const atMax = isRestockable && avail !== undefined && item.quantity >= avail;
 
-                      <div className="min-w-0 flex-1">
-                        <div className="text-base font-bold text-surface-900 truncate">
-                          {item.product_name}
-                          {item.product_code === 'CUSTOM' && (
-                            <span className="ml-1.5 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">
-                              Custom
-                            </span>
+                  return (
+                    <div
+                      key={item.product_id}
+                      className={`p-2.5 rounded-xl border flex flex-col gap-1.5 transition-all ${
+                        hasStockIssue
+                          ? 'bg-red-50/70 border-red-300 ring-1 ring-red-400/30'
+                          : item.product_code === 'CUSTOM'
+                          ? 'bg-amber-50/50 border-amber-200'
+                          : 'bg-surface-50 border-surface-200'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2 justify-between">
+                        {/* Cart Item Thumbnail */}
+                        <div className="w-12 h-12 rounded-lg bg-surface-100 border border-surface-200 flex items-center justify-center overflow-hidden flex-shrink-0">
+                          {itemImage ? (
+                            <img
+                              src={itemImage}
+                              alt={item.product_name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="text-base font-bold text-surface-400 flex items-center justify-center">
+                              {item.product_code === 'CUSTOM' ? (
+                                <Sparkles className="w-4 h-4 text-amber-500" />
+                              ) : (
+                                item.product_name.charAt(0).toUpperCase()
+                              )}
+                            </div>
                           )}
                         </div>
-                        <div className="text-sm text-surface-500 font-mono mt-0.5">
-                          {formatCurrency(item.unit_price_paise)} each
+
+                        <div className="min-w-0 flex-1 pr-1">
+                          <div className="text-base font-extrabold text-surface-900 leading-snug break-words">
+                            {item.product_name}
+                            {item.product_code === 'CUSTOM' && (
+                              <span className="ml-1.5 text-2xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">
+                                Custom
+                              </span>
+                            )}
+                            {gstEnabled && item.gst_enabled && item.gst_percentage_x100 > 0 && (
+                              <span className="ml-1.5 text-2xs bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-bold font-mono">
+                                GST {item.gst_percentage_x100 / 100}%
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs sm:text-sm text-surface-600 font-mono mt-0.5 flex items-center gap-1.5 flex-wrap font-medium">
+                            <span>{formatCurrency(item.unit_price_paise)} each</span>
+                            {isZeroStock && (
+                              <span className="text-xs text-red-700 bg-red-100/90 border border-red-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3 text-red-600 flex-shrink-0" />
+                                Out of Stock (0 available)
+                              </span>
+                            )}
+                            {!isZeroStock && isExceeded && (
+                              <span className="text-xs text-red-700 bg-red-100/90 border border-red-200 px-1.5 py-0.5 rounded font-bold flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-red-600 flex-shrink-0" />
+                                Exceeds Stock ({avail} max)
+                              </span>
+                            )}
+                            {!hasStockIssue && atMax && (
+                              <span className="text-xs text-amber-700 bg-amber-100/70 px-1.5 py-0.5 rounded font-semibold">
+                                Max Stock ({avail})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div
+                          className="text-base sm:text-lg font-black text-surface-900 font-mono shrink-0 text-right tabular-nums whitespace-nowrap pl-1"
+                          title={formatCurrency(item.unit_price_paise * item.quantity)}
+                        >
+                          {formatCurrency(item.unit_price_paise * item.quantity)}
                         </div>
                       </div>
-                      <div className="text-base font-extrabold text-surface-900 font-mono">
-                        {formatCurrency(item.unit_price_paise * item.quantity)}
+
+                      <div className="flex items-center justify-between pt-1.5 border-t border-surface-200/60">
+                        {/* Quantity Buttons with Stock Capping */}
+                        <div className="qty-control bg-white flex-shrink-0">
+                          <button
+                            onClick={() =>
+                              updateQuantity(item.product_id, item.quantity - 1)
+                            }
+                            className="qty-btn"
+                            title="Decrease quantity (-)"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            max={avail}
+                            value={item.quantity}
+                            onChange={(e) =>
+                              updateQuantity(
+                                item.product_id,
+                                parseInt(e.target.value) || 1
+                              )
+                            }
+                            className="qty-input"
+                          />
+                          <button
+                            onClick={() =>
+                              updateQuantity(item.product_id, item.quantity + 1)
+                            }
+                            disabled={atMax || isZeroStock}
+                            className={`qty-btn ${atMax || isZeroStock ? 'opacity-35 cursor-not-allowed bg-surface-100' : ''}`}
+                            title={
+                              isZeroStock
+                                ? 'Product is out of stock (0 available)'
+                                : atMax
+                                ? `Maximum stock reached (${avail} units)`
+                                : "Increase quantity (+)"
+                            }
+                          >
+                            <Plus className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* Remove Button */}
+                        <button
+                          onClick={() => removeFromCart(item.product_id)}
+                          className="text-surface-400 hover:text-red-600 p-1.5 transition-colors"
+                          title="Remove product"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
                       </div>
                     </div>
-
-                    <div className="flex items-center justify-between pt-1.5 border-t border-surface-200/60">
-                      {/* Quantity Buttons */}
-                      <div className="qty-control bg-white">
-                        <button
-                          onClick={() =>
-                            updateQuantity(item.product_id, item.quantity - 1)
-                          }
-                          className="qty-btn"
-                          title="Decrease quantity (-)"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                        <input
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(e) =>
-                            updateQuantity(
-                              item.product_id,
-                              parseInt(e.target.value) || 1
-                            )
-                          }
-                          className="qty-input"
-                        />
-                        <button
-                          onClick={() =>
-                            updateQuantity(item.product_id, item.quantity + 1)
-                          }
-                          className="qty-btn"
-                          title="Increase quantity (+)"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      {/* Remove Button */}
-                      <button
-                        onClick={() => removeFromCart(item.product_id)}
-                        className="text-surface-400 hover:text-red-600 p-1.5 transition-colors"
-                        title="Remove product"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1015,21 +1201,23 @@ export const BillingPage: React.FC = () => {
               </span>
             </div>
 
-            {/* Discount Control Row */}
+            {/* Discount Control Row with Staff Limits and Dynamic Currency */}
             <div className="flex items-center justify-between text-base">
               <div className="flex items-center gap-1.5">
                 <span className="text-surface-700 font-medium">Discount:</span>
-                <select
+                <CustomSelect
                   value={discountType}
-                  onChange={(e) => {
-                    setDiscountTypeForTab(e.target.value as any);
+                  onChange={(val) => {
+                    setDiscountTypeForTab(val as any);
                   }}
-                  className="text-sm border border-surface-300 rounded-lg px-2.5 py-1 bg-white font-medium"
-                >
-                  <option value="none">None</option>
-                  <option value="percentage">% Pct</option>
-                  <option value="fixed">₹ Fixed</option>
-                </select>
+                  options={[
+                    { value: 'none', label: 'None' },
+                    { value: 'percentage', label: '% Pct' },
+                    { value: 'fixed', label: `${currencySymbol} Fixed` },
+                  ]}
+                  size="sm"
+                  buttonClassName="w-24 h-7 text-xs font-medium rounded-lg"
+                />
               </div>
 
               {discountType !== 'none' ? (
@@ -1039,9 +1227,16 @@ export const BillingPage: React.FC = () => {
                     min="0"
                     max={discountType === 'percentage' ? 100 : undefined}
                     value={discountValue || ''}
-                    onChange={(e) =>
-                      setDiscountValueForTab(parseFloat(e.target.value) || 0)
-                    }
+                    onChange={(e) => {
+                      const entered = parseFloat(e.target.value) || 0;
+                      const maxAllowed = isAdmin ? 100 : (user?.max_discount_pct ?? 10);
+                      if (discountType === 'percentage' && !isAdmin && entered > maxAllowed) {
+                        toast.error(`Staff discount limit is ${maxAllowed}%. Clamped to limit.`);
+                        setDiscountValueForTab(maxAllowed);
+                        return;
+                      }
+                      setDiscountValueForTab(entered);
+                    }}
                     placeholder="0"
                     className="w-20 text-right text-base px-2 py-1 border border-surface-300 rounded-lg bg-white font-mono font-bold"
                   />
@@ -1051,13 +1246,13 @@ export const BillingPage: React.FC = () => {
                 </div>
               ) : (
                 <span className="text-sm text-surface-400 font-mono">
-                  ₹0.00
+                  {formatCurrency(0)}
                 </span>
               )}
             </div>
 
-            {/* Optional GST Row */}
-            {gstEnabled && (
+            {/* Optional GST Row - Only shown when GST is enabled and > 0 */}
+            {gstEnabled && calculations.gstTotalPaise > 0 && (
               <div className="flex items-center justify-between text-base text-surface-700">
                 <span className="font-medium">GST (Taxes)</span>
                 <span className="font-mono font-bold">
@@ -1071,19 +1266,27 @@ export const BillingPage: React.FC = () => {
               <span className="text-xl font-extrabold text-surface-900">
                 Grand Total
               </span>
-              <span className="text-3xl font-black text-primary-700 font-mono tracking-tight">
+              <span className="text-3xl font-black text-primary-700 font-mono tracking-tight tabular-nums">
                 {formatCurrency(calculations.grandTotalPaise)}
               </span>
             </div>
 
+            {/* Out of Stock Alert Banner */}
+            {hasOutOfStockItems && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-800 font-bold flex items-center gap-2.5 shadow-2xs">
+                <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                <span>Items with 0 stock or exceeding stock detected. Remove or adjust them before checkout.</span>
+              </div>
+            )}
+
             {/* Checkout Button */}
             <button
               onClick={handleOpenPayment}
-              disabled={cart.length === 0}
+              disabled={cart.length === 0 || hasOutOfStockItems}
               className="btn-success w-full py-4 flex items-center justify-center gap-3 text-lg font-extrabold shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-2 tracking-wide"
             >
               <span>Collect Payment [F4]</span>
-              <span className="font-mono text-base bg-accent-700 px-3 py-1 rounded-md font-bold">
+              <span className="font-mono text-base bg-accent-700 px-3 py-1 rounded-md font-bold whitespace-nowrap tabular-nums">
                 {formatCurrency(calculations.grandTotalPaise)}
               </span>
             </button>
@@ -1142,7 +1345,7 @@ export const BillingPage: React.FC = () => {
               </label>
               <input
                 type="number"
-                step="0.5"
+                step="any"
                 min="0"
                 value={customItemPrice}
                 onChange={(e) => setCustomItemPrice(e.target.value)}
@@ -1166,6 +1369,46 @@ export const BillingPage: React.FC = () => {
             </div>
           </div>
 
+          {/* GST Toggle Option for Custom Item - Only if GST enabled */}
+          {gstEnabled && (
+            <div className="p-3 rounded-lg bg-surface-50 border border-surface-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-surface-800">Item GST Rate</div>
+                  <div className="text-3xs text-surface-500">Apply GST percentage on this custom item</div>
+                </div>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={customItemGstEnabled}
+                    onChange={(e) => setCustomItemGstEnabled(e.target.checked)}
+                    className="form-checkbox"
+                  />
+                  <span className="text-xs font-medium text-surface-700">Enable GST</span>
+                </label>
+              </div>
+
+              {customItemGstEnabled && (
+                <div className="pt-2 border-t border-surface-200 flex items-center justify-between gap-2">
+                  <span className="text-xs text-surface-600 font-medium">GST Percentage:</span>
+                  <CustomSelect
+                    value={customItemGstPct}
+                    onChange={setCustomItemGstPct}
+                    options={[
+                      { value: '0', label: '0%' },
+                      { value: '5', label: '5%' },
+                      { value: '12', label: '12%' },
+                      { value: '18', label: '18%' },
+                      { value: '28', label: '28%' },
+                    ]}
+                    size="sm"
+                    buttonClassName="w-24 h-8 text-xs font-mono font-medium rounded-lg"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
             <strong>Note:</strong> Custom items are not saved to your product
             catalog. They appear only on this bill.
@@ -1179,6 +1422,7 @@ export const BillingPage: React.FC = () => {
         onClose={() => setIsPaymentOpen(false)}
         title="Complete Payment & Generate Bill"
         maxWidth="lg"
+        closeOnBackdropClick={false}
         footer={
           <div className="flex items-center justify-between gap-3 w-full">
             <button
@@ -1361,33 +1605,51 @@ export const BillingPage: React.FC = () => {
             <div className="p-4 rounded-xl bg-surface-50 border border-surface-200 space-y-3.5">
               <div className="grid grid-cols-2 gap-3">
                 <div className="form-group">
-                  <label className="form-label text-sm font-semibold">
-                    UPI Amount (₹)
+                  <label className="form-label text-sm font-semibold text-surface-800 flex items-center justify-between">
+                    <span>UPI Amount (₹)</span>
+                    <span className="text-3xs text-primary-600 font-medium">Auto-Adjusts Cash</span>
                   </label>
                   <input
                     type="number"
+                    min="0"
+                    step="0.01"
                     value={splitUpi}
                     onChange={(e) => {
-                      setSplitUpi(e.target.value);
-                      const remaining = Math.max(
-                        0,
-                        calculations.grandTotalPaise -
-                          rupeesToPaise(e.target.value)
-                      );
-                      setSplitCash(paiseToRupeesStr(remaining));
+                      const val = e.target.value;
+                      setSplitUpi(val);
+                      if (val.trim() === '') {
+                        setSplitCash(paiseToRupeesStr(calculations.grandTotalPaise));
+                      } else {
+                        const upiPaise = rupeesToPaise(val);
+                        const rem = Math.max(0, calculations.grandTotalPaise - upiPaise);
+                        setSplitCash(paiseToRupeesStr(rem));
+                      }
                     }}
                     className="form-input font-mono text-base font-bold h-12"
                     placeholder="0.00"
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label text-sm font-semibold">
-                    Cash Amount (₹)
+                  <label className="form-label text-sm font-semibold text-surface-800 flex items-center justify-between">
+                    <span>Cash Amount (₹)</span>
+                    <span className="text-3xs text-primary-600 font-medium">Auto-Adjusts UPI</span>
                   </label>
                   <input
                     type="number"
+                    min="0"
+                    step="0.01"
                     value={splitCash}
-                    onChange={(e) => setSplitCash(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSplitCash(val);
+                      if (val.trim() === '') {
+                        setSplitUpi(paiseToRupeesStr(calculations.grandTotalPaise));
+                      } else {
+                        const cashPaise = rupeesToPaise(val);
+                        const rem = Math.max(0, calculations.grandTotalPaise - cashPaise);
+                        setSplitUpi(paiseToRupeesStr(rem));
+                      }
+                    }}
                     className="form-input font-mono text-base font-bold h-12"
                     placeholder="0.00"
                   />
@@ -1396,13 +1658,22 @@ export const BillingPage: React.FC = () => {
 
               <div className="flex items-center justify-between pt-2.5 border-t border-surface-200">
                 <span className="text-base text-surface-700 font-medium">
-                  Total Paid:
+                  Total Paid / Bill Total:
                 </span>
-                <span className="font-mono font-black text-xl text-surface-900">
-                  {formatCurrency(
-                    rupeesToPaise(splitUpi) + rupeesToPaise(splitCash)
-                  )}
-                </span>
+                <div className="text-right">
+                  <span className={`font-mono font-black text-xl ${
+                    rupeesToPaise(splitUpi) + rupeesToPaise(splitCash) >= calculations.grandTotalPaise
+                      ? 'text-emerald-700'
+                      : 'text-amber-600'
+                  }`}>
+                    {formatCurrency(
+                      rupeesToPaise(splitUpi) + rupeesToPaise(splitCash)
+                    )}
+                  </span>
+                  <span className="font-mono text-xs text-surface-500 font-medium ml-1.5">
+                    / {formatCurrency(calculations.grandTotalPaise)}
+                  </span>
+                </div>
               </div>
             </div>
           )}

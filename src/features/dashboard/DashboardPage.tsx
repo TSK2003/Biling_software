@@ -7,9 +7,12 @@ import {
   QrCode,
   ArrowUpRight,
   Calendar,
+  Wallet,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
-import { formatCurrency, getTodayDateString } from '../../lib/format';
+import { formatCurrency, getTodayDateString, formatDateDMY } from '../../lib/format';
 import { Header } from '../../components/Header';
 import type { DashboardStats, Bill } from '../../types';
 import toast from 'react-hot-toast';
@@ -29,12 +32,12 @@ export const DashboardPage: React.FC = () => {
         api.getDashboardStats(dateFrom, dateTo).catch(() => null),
         api.getRecentBills(8).catch(() => []),
       ]);
-      setStats(s || { total_sales_paise: 0, total_bills: 0, total_items_sold: 0, cash_sales_paise: 0, upi_sales_paise: 0, card_sales_paise: 0, total_discount_paise: 0, total_gst_paise: 0, avg_bill_paise: 0 });
+      setStats(s || { total_sales_paise: 0, total_bills: 0, total_items_sold: 0, cash_sales_paise: 0, upi_sales_paise: 0, card_sales_paise: 0, total_discount_paise: 0, total_gst_paise: 0, avg_bill_paise: 0, total_expenses_paise: 0, net_income_paise: 0 });
       setRecentBills(recent || []);
     } catch (err) {
       console.error(err);
       toast.error('Failed to load dashboard metrics');
-      setStats({ total_sales_paise: 0, total_bills: 0, total_items_sold: 0, cash_sales_paise: 0, upi_sales_paise: 0, card_sales_paise: 0, total_discount_paise: 0, total_gst_paise: 0, avg_bill_paise: 0 });
+      setStats({ total_sales_paise: 0, total_bills: 0, total_items_sold: 0, cash_sales_paise: 0, upi_sales_paise: 0, card_sales_paise: 0, total_discount_paise: 0, total_gst_paise: 0, avg_bill_paise: 0, total_expenses_paise: 0, net_income_paise: 0 });
       setRecentBills([]);
     } finally {
       setIsLoading(false);
@@ -45,33 +48,6 @@ export const DashboardPage: React.FC = () => {
     loadDashboardData();
   }, [dateFrom, dateTo]);
 
-  const handleSetQuickDate = (type: 'today' | 'month' | 'year') => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-
-    if (type === 'today') {
-      setDateFrom(`${y}-${m}-${d}`);
-      setDateTo(`${y}-${m}-${d}`);
-    } else if (type === 'month') {
-      setDateFrom(`${y}-${m}-01`);
-      setDateTo(`${y}-${m}-${d}`);
-    } else if (type === 'year') {
-      setDateFrom(`${y}-01-01`);
-      setDateTo(`${y}-${m}-${d}`);
-    }
-  };
-
-  // Active date range detection for button highlights
-  const now = new Date();
-  const curY = now.getFullYear();
-  const curM = String(now.getMonth() + 1).padStart(2, '0');
-  const curD = String(now.getDate()).padStart(2, '0');
-  const isToday = dateFrom === `${curY}-${curM}-${curD}` && dateTo === `${curY}-${curM}-${curD}`;
-  const isMonth = dateFrom === `${curY}-${curM}-01` && dateTo === `${curY}-${curM}-${curD}`;
-  const isYear = dateFrom === `${curY}-01-01` && dateTo === `${curY}-${curM}-${curD}`;
-
   return (
     <div className="flex flex-col h-full overflow-hidden bg-surface-50">
       <Header
@@ -79,43 +55,6 @@ export const DashboardPage: React.FC = () => {
         subtitle="Live sales performance, payment channels, and transaction volume"
         actions={
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Quick Presets */}
-            <div className="flex items-center gap-1 bg-surface-100 p-1 rounded-lg border border-surface-200 h-9">
-              <button
-                type="button"
-                onClick={() => handleSetQuickDate('today')}
-                className={`h-7 px-3 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                  isToday
-                    ? 'bg-white text-primary-700 shadow-xs font-bold'
-                    : 'text-surface-600 hover:text-surface-900'
-                }`}
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSetQuickDate('month')}
-                className={`h-7 px-3 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                  isMonth && !isToday
-                    ? 'bg-white text-primary-700 shadow-xs font-bold'
-                    : 'text-surface-600 hover:text-surface-900'
-                }`}
-              >
-                This Month
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSetQuickDate('year')}
-                className={`h-7 px-3 text-xs font-semibold rounded-md transition-all cursor-pointer ${
-                  isYear && !isMonth && !isToday
-                    ? 'bg-white text-primary-700 shadow-xs font-bold'
-                    : 'text-surface-600 hover:text-surface-900'
-                }`}
-              >
-                This Year
-              </button>
-            </div>
-
             {/* Custom From - To Range Filter */}
             <div className="flex items-center gap-1.5 bg-white px-3 py-1 rounded-lg border border-surface-200 shadow-xs h-9">
               <Calendar className="w-3.5 h-3.5 text-primary-600 flex-shrink-0" />
@@ -224,6 +163,49 @@ export const DashboardPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Operating Expenses & Net Income Summary Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="card p-4 border-l-4 border-l-rose-500 flex items-center justify-between shadow-xs hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 flex items-center justify-center flex-shrink-0">
+                <Wallet className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Operating Expenses</div>
+                <div className="text-xl font-black text-rose-700 font-mono mt-0.5">
+                  {formatCurrency(stats?.total_expenses_paise || 0)}
+                </div>
+              </div>
+            </div>
+            <span className="text-2xs text-surface-400 font-medium">Recorded Outflows</span>
+          </div>
+
+          <div className="card p-4 border-l-4 border-l-emerald-600 flex items-center justify-between shadow-xs hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3.5">
+              <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 border ${
+                (stats?.net_income_paise ?? 0) >= 0
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-red-50 text-red-700 border-red-200'
+              }`}>
+                {(stats?.net_income_paise ?? 0) >= 0 ? (
+                  <TrendingUp className="w-5 h-5" />
+                ) : (
+                  <TrendingDown className="w-5 h-5" />
+                )}
+              </div>
+              <div>
+                <div className="text-2xs font-bold text-surface-500 uppercase tracking-wide">Net Operating Income</div>
+                <div className={`text-xl font-black font-mono mt-0.5 ${
+                  (stats?.net_income_paise ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-700'
+                }`}>
+                  {formatCurrency(stats?.net_income_paise ?? (stats?.total_sales_paise || 0))}
+                </div>
+              </div>
+            </div>
+            <span className="text-2xs text-surface-400 font-medium">Revenue − Expenses</span>
+          </div>
+        </div>
+
         {/* Payment Channels Breakdown */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="card p-4 flex items-center gap-3.5 border-l-4 border-l-emerald-500">
@@ -306,7 +288,7 @@ export const DashboardPage: React.FC = () => {
                         #{b.bill_number}
                       </td>
                       <td className="text-xs text-surface-700 font-mono font-medium">
-                        {b.business_date} {b.bill_time}
+                        {formatDateDMY(b.business_date)} {b.bill_time}
                       </td>
                       <td className="text-xs font-semibold text-surface-900">
                         {b.user_name || 'Staff'}

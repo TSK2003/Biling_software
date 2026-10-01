@@ -43,6 +43,20 @@ pub struct ReportSummary {
 pub struct ReportService;
 
 impl ReportService {
+    /// Get user Downloads directory
+    pub fn get_downloads_dir() -> std::path::PathBuf {
+        #[cfg(windows)]
+        {
+            if let Ok(profile) = std::env::var("USERPROFILE") {
+                let dl = std::path::PathBuf::from(profile).join("Downloads");
+                if dl.exists() {
+                    return dl;
+                }
+            }
+        }
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    }
+
     /// Generate daily Excel sales report (DD-MM-YYYY.xlsx)
     pub fn generate_daily_report(db: &Database, date: &str) -> Result<String, String> {
         Self::generate_date_range_report(db, date, date)
@@ -202,11 +216,22 @@ impl ReportService {
             worksheet.set_column_width(col as u16, *w).map_err(|e| e.to_string())?;
         }
 
-        // Save workbook to file
-        workbook.save(&file_path).map_err(|e| format!("Failed to save Excel file: {}", e))?;
+        // Save workbook directly to user's Downloads directory
+        let downloads_dir = Self::get_downloads_dir();
+        let download_file_path = downloads_dir.join(&filename);
+        let path_str = match workbook.save(&download_file_path) {
+            Ok(_) => {
+                // Also save internal archival copy
+                let _ = workbook.save(&file_path);
+                download_file_path.to_string_lossy().to_string()
+            }
+            Err(_) => {
+                workbook.save(&file_path).map_err(|e| format!("Failed to save Excel file: {}", e))?;
+                file_path.to_string_lossy().to_string()
+            }
+        };
 
         // Queue in sync_queue for Google Drive upload
-        let path_str = file_path.to_string_lossy().to_string();
         let _ = db.conn.execute(
             "INSERT INTO sync_queue (file_type, local_path, status) VALUES ('report', ?1, 'pending')",
             params![path_str],
@@ -246,7 +271,7 @@ impl ReportService {
              JOIN bill_items bi ON b.id = bi.bill_id
              LEFT JOIN users u ON b.user_id = u.id
              LEFT JOIN payments p ON b.id = p.bill_id
-             WHERE b.business_date >= ?1 AND b.business_date <= ?2 AND b.status != 'cancelled'
+             WHERE b.business_date >= ?1 AND b.business_date <= ?2 AND b.status IN ('completed', 'returned')
              ORDER BY b.business_date ASC, b.bill_number ASC, bi.id ASC"
         ).map_err(|e| format!("Database query error: {}", e))?;
 
@@ -281,11 +306,16 @@ impl ReportService {
             }
         }
 
-        // Query summary
+        // Query summary: compute total_bills and financials from bills & payments (1:1), and total_items from bill_items subquery
         let mut summary_stmt = db.conn.prepare(
             "SELECT 
-                COUNT(DISTINCT b.id) as total_bills,
-                COALESCE(SUM(bi.quantity), 0) as total_items,
+                COUNT(b.id) as total_bills,
+                (
+                    SELECT COALESCE(SUM(bi.quantity), 0)
+                    FROM bill_items bi
+                    JOIN bills b2 ON bi.bill_id = b2.id
+                    WHERE b2.business_date >= ?1 AND b2.business_date <= ?2 AND b2.status IN ('completed', 'returned')
+                ) as total_items,
                 COALESCE(SUM(b.subtotal_paise), 0) as gross_sales,
                 COALESCE(SUM(b.discount_amount_paise), 0) as total_discount,
                 COALESCE(SUM(b.gst_total_paise), 0) as total_gst,
@@ -294,7 +324,6 @@ impl ReportService {
                 COALESCE(SUM(p.upi_amount_paise), 0) as total_upi,
                 COALESCE(SUM(p.card_amount_paise), 0) as total_card
              FROM bills b
-             LEFT JOIN bill_items bi ON b.id = bi.bill_id
              LEFT JOIN payments p ON b.id = p.bill_id
              WHERE b.business_date >= ?1 AND b.business_date <= ?2 AND b.status IN ('completed', 'returned')"
         ).map_err(|e| format!("Summary query error: {}", e))?;

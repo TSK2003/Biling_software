@@ -23,6 +23,21 @@ import type {
   StockMovement,
   ReturnBillItem,
   DriveInfo,
+  ExpenseCategory,
+  Expense,
+  ExpenseSummary,
+  CreateExpenseRequest,
+  UpdateExpenseRequest,
+  ExpensesFilterRequest,
+  PrinterInfo,
+  PrintReceiptRequest,
+  ProductExportResult,
+  ProductCsvExportResult,
+  ProductImportSummary,
+  BackupManifest,
+  BackupRecord,
+  AwsBackupResponse,
+  AutoBackupStatus,
 } from '../types';
 
 // ============================================================
@@ -95,6 +110,16 @@ export const api = {
     invoke<Category>('create_category', { name, sortOrder }),
   updateCategory: (id: number, name?: string, sortOrder?: number, isActive?: boolean) =>
     invoke<Category>('update_category', { id, name, sortOrder, isActive }),
+  reorderCategories: async (orderedIds: number[]) => {
+    try {
+      await invoke<void>('reorder_categories', { orderedIds });
+    } catch {
+      // Robust fallback: sequential updates
+      for (let i = 0; i < orderedIds.length; i++) {
+        await invoke<Category>('update_category', { id: orderedIds[i], sortOrder: i + 1 });
+      }
+    }
+  },
   deleteCategory: (id: number) =>
     invoke<void>('delete_category', { id }),
 
@@ -109,7 +134,10 @@ export const api = {
     sellingPricePaise: number,
     gstEnabled?: boolean,
     gstPercentageX100?: number,
-    imagePath?: string
+    imagePath?: string,
+    isRestockable?: boolean,
+    buyingPricePaise?: number,
+    initialStock?: number
   ) =>
     invoke<Product>('create_product', {
       name,
@@ -118,6 +146,9 @@ export const api = {
       gstEnabled,
       gstPercentageX100,
       imagePath,
+      isRestockable,
+      buyingPricePaise,
+      initialStock,
     }),
   updateProduct: (
     id: number,
@@ -127,7 +158,9 @@ export const api = {
     gstEnabled?: boolean,
     gstPercentageX100?: number,
     isActive?: boolean,
-    imagePath?: string
+    imagePath?: string,
+    isRestockable?: boolean,
+    buyingPricePaise?: number
   ) =>
     invoke<Product>('update_product', {
       id,
@@ -138,6 +171,24 @@ export const api = {
       gstPercentageX100,
       isActive,
       imagePath,
+      isRestockable,
+      buyingPricePaise,
+    }),
+  restockProduct: (
+    productId: number,
+    quantity: number,
+    buyingPricePaise: number,
+    sellingPricePaise?: number,
+    paymentMethod?: string,
+    notes?: string
+  ) =>
+    invoke<Product>('restock_product', {
+      productId,
+      quantity,
+      buyingPricePaise,
+      sellingPricePaise,
+      paymentMethod,
+      notes,
     }),
   deleteProduct: (id: number) =>
     invoke<void>('delete_product', { id }),
@@ -149,6 +200,14 @@ export const api = {
     invoke<number>('seed_demo_products'),
   clearDemoProducts: () =>
     invoke<number>('clear_demo_products'),
+  exportProductsExcel: () =>
+    invoke<ProductExportResult>('export_products_excel'),
+  exportProductsCsv: () =>
+    invoke<ProductCsvExportResult>('export_products_csv'),
+  importProductsCsv: (csvContent: string) =>
+    invoke<ProductImportSummary>('import_products_csv', { csvContent }),
+  importProductsExcel: (filePath: string) =>
+    invoke<ProductImportSummary>('import_products_excel', { filePath }),
 
   // Billing
   getBillingProducts: (categoryId?: number, search?: string) =>
@@ -189,6 +248,7 @@ export const api = {
     dateTo?: string;
     status?: string;
     search?: string;
+    categoryId?: number;
     page?: number;
     pageSize?: number;
   }) =>
@@ -198,6 +258,7 @@ export const api = {
       dateTo: params.dateTo,
       status: params.status,
       search: params.search,
+      categoryId: params.categoryId,
       page: params.page,
       pageSize: params.pageSize,
     }),
@@ -257,14 +318,42 @@ export const api = {
   // Backup
   createBackup: (backupType?: string) =>
     invoke<string>('create_backup', { backupType }),
+  createAwsBackup: (backupType?: string) =>
+    invoke<AwsBackupResponse>('create_aws_backup', { backupType }),
+  exportMasterExcelBackup: () =>
+    invoke<string>('export_master_excel_backup'),
+  convertBackupArchiveToExcel: (archivePath: string) =>
+    invoke<string>('convert_backup_archive_to_excel', { archivePath }),
   validateBackup: (path: string) =>
-    invoke<string>('validate_backup', { path }),
+    invoke<BackupManifest>('validate_backup', { path }),
   restoreBackup: (path: string) =>
     invoke<void>('restore_backup', { path }),
+  verifyAdminPassword: (password: string) =>
+    invoke<boolean>('verify_admin_password', { password }),
   getBackupList: () =>
-    invoke<any[]>('get_backup_list'),
+    invoke<BackupRecord[]>('get_backup_list'),
   clearAllBusinessData: () =>
     invoke<void>('clear_all_business_data'),
+  openDownloadsFolder: () =>
+    invoke<void>('open_downloads_folder'),
+  showInFileManager: (path: string) =>
+    invoke<void>('show_in_file_manager', { path }),
+  openExternalUrl: (url: string) =>
+    invoke<void>('open_external_url', { url }),
+  openFile: (path: string) =>
+    invoke<void>('open_file', { path }),
+  syncToGoogleDrive: (folderId?: string) =>
+    invoke<AwsBackupResponse>('sync_to_gdrive', { folderId }),
+  checkDailyBackup: () =>
+    invoke<BackupRecord | null>('check_daily_backup'),
+  triggerDailyBackupNow: () =>
+    invoke<BackupRecord>('trigger_daily_backup_now'),
+  getAutoBackupStatus: () =>
+    invoke<AutoBackupStatus>('get_auto_backup_status'),
+  setAutoBackupEnabled: (enabled: boolean) =>
+    invoke<void>('set_auto_backup_enabled', { enabled }),
+  openAppBackupsFolder: () =>
+    invoke<void>('open_app_backups_folder'),
 
   // Import
   validateExcelImport: (filePath: string) =>
@@ -282,6 +371,8 @@ export const api = {
     invoke<LicenseStatus>('activate_with_code', { code, shopName }),
   getLicenseInfo: () => invoke<LicenseStatus>('get_license_info'),
   deactivateLicense: () => invoke<void>('deactivate_license'),
+  createUsbSecurityKey: (driveLetter: string, shopName?: string) =>
+    invoke<string>('create_usb_security_key', { driveLetter, shopName }),
 
   // Network & Multi-Computer Mode
   getNetworkInfo: () => invoke<NetworkInfo>('get_network_info'),
@@ -336,4 +427,36 @@ export const api = {
     }),
   getStockMovements: (productId?: number) =>
     invoke<StockMovement[]>('get_stock_movements', { productId }),
+
+  // Expenses
+  getExpenseCategories: (activeOnly?: boolean) =>
+    invoke<ExpenseCategory[]>('get_expense_categories', { activeOnly }),
+  createExpenseCategory: (name: string, description?: string, sortOrder?: number) =>
+    invoke<ExpenseCategory>('create_expense_category', { name, description, sortOrder }),
+  updateExpenseCategory: (id: number, name?: string, description?: string, sortOrder?: number, isActive?: boolean) =>
+    invoke<ExpenseCategory>('update_expense_category', { id, name, description, sortOrder, isActive }),
+  deleteExpenseCategory: (id: number) =>
+    invoke<void>('delete_expense_category', { id }),
+  getExpenses: (filter?: ExpensesFilterRequest) =>
+    invoke<PaginatedResponse<Expense>>('get_expenses', { filter }),
+  getExpenseDetail: (id: number) =>
+    invoke<Expense>('get_expense_detail', { id }),
+  createExpense: (request: CreateExpenseRequest) =>
+    invoke<Expense>('create_expense', { request }),
+  updateExpense: (request: UpdateExpenseRequest) =>
+    invoke<Expense>('update_expense', { request }),
+  cancelExpense: (id: number, reason: string) =>
+    invoke<void>('cancel_expense', { id, reason }),
+  getExpenseSummary: (dateFrom: string, dateTo: string) =>
+    invoke<ExpenseSummary>('get_expense_summary', { dateFrom, dateTo }),
+  exportExpensesExcel: (dateFrom: string, dateTo: string) =>
+    invoke<string>('export_expenses_excel', { dateFrom, dateTo }),
+
+  // Printing & Hardware
+  getPrinters: () => invoke<PrinterInfo[]>('get_printers'),
+  getDefaultPrinter: () => invoke<string | null>('get_default_printer'),
+  printReceipt: (request: PrintReceiptRequest) =>
+    invoke<string>('print_receipt', { request }),
+  testPrint: (printerName?: string, paperSize?: string) =>
+    invoke<string>('test_print', { printerName, paperSize }),
 };

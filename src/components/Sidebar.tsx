@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -9,28 +9,31 @@ import {
   FileText,
   Settings,
   Users,
-  HardDrive,
   LogOut,
   ShieldCheck,
+  Wallet,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
+import { ConfirmModal } from './ConfirmModal';
 
 export const Sidebar: React.FC = () => {
   const { user, logout, isAdmin, canAccess } = useAuth();
   const { shopName, settings } = useSettings();
   const navigate = useNavigate();
+  const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
 
   const customLogo = settings['shop_logo'];
 
   const handleLogout = async () => {
+    setIsLogoutConfirmOpen(false);
     await logout();
     navigate('/login');
   };
 
-  const showBillingSection = canAccess('billing') || canAccess('bills') || canAccess('dashboard');
-  const showCatalogSection = canAccess('products') || canAccess('categories');
-  const showToolsSection = canAccess('reports') || canAccess('backup') || canAccess('users') || canAccess('settings');
+  const showBillingSection = canAccess('billing') || canAccess('bills');
+  const showCatalogSection = canAccess('dashboard') || canAccess('expenses') || canAccess('products') || canAccess('categories');
+  const showToolsSection = canAccess('reports') || canAccess('users') || canAccess('settings');
 
   return (
     <aside className="sidebar">
@@ -99,6 +102,14 @@ export const Sidebar: React.FC = () => {
                 <span>Billing History</span>
               </NavLink>
             )}
+          </>
+        )}
+
+        {showCatalogSection && (
+          <>
+            <div className="px-4 pt-4 pb-1.5 text-xs font-bold text-surface-400 uppercase tracking-wider">
+              Catalog Management
+            </div>
 
             {canAccess('dashboard') && (
               <NavLink
@@ -109,14 +120,16 @@ export const Sidebar: React.FC = () => {
                 <span>Dashboard</span>
               </NavLink>
             )}
-          </>
-        )}
 
-        {showCatalogSection && (
-          <>
-            <div className="px-4 pt-4 pb-1.5 text-xs font-bold text-surface-400 uppercase tracking-wider">
-              Catalog Management
-            </div>
+            {canAccess('expenses') && (
+              <NavLink
+                to="/expenses"
+                className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
+              >
+                <Wallet className="w-5 h-5" />
+                <span>Expenses</span>
+              </NavLink>
+            )}
 
             {canAccess('products') && (
               <NavLink
@@ -153,16 +166,6 @@ export const Sidebar: React.FC = () => {
               >
                 <FileText className="w-5 h-5" />
                 <span>Sales Reports</span>
-              </NavLink>
-            )}
-
-            {canAccess('backup') && (
-              <NavLink
-                to="/backup"
-                className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
-              >
-                <HardDrive className="w-5 h-5" />
-                <span>Backup & Import</span>
               </NavLink>
             )}
 
@@ -206,14 +209,36 @@ export const Sidebar: React.FC = () => {
             </div>
           </div>
           <button
-            onClick={handleLogout}
-            className="p-2 text-surface-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+            onClick={() => setIsLogoutConfirmOpen(true)}
+            className="p-2 text-surface-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
             title="Logout"
           >
             <LogOut className="w-5 h-5" />
           </button>
         </div>
       </div>
+
+      {/* AESCION Software Copyright */}
+      <div className="px-4 py-2 border-t border-surface-200/60 bg-surface-100/40 text-center select-none">
+        <div className="text-[10px] font-semibold text-surface-600 tracking-wide">
+          © <span className="font-bold text-surface-800">AESCION</span> • Billing Software
+        </div>
+        <div className="text-[9px] text-surface-400 font-medium">
+          All Rights Reserved
+        </div>
+      </div>
+
+      {/* Confirm Logout Modal */}
+      <ConfirmModal
+        isOpen={isLogoutConfirmOpen}
+        onClose={() => setIsLogoutConfirmOpen(false)}
+        onConfirm={handleLogout}
+        title="Confirm Logout"
+        message="Are you sure you want to log out from this billing terminal?"
+        confirmText="Yes, Log Out"
+        cancelText="Cancel"
+        isDestructive={false}
+      />
     </aside>
   );
 };

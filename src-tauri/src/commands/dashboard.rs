@@ -8,7 +8,30 @@ pub fn get_dashboard_stats(
     date_from: String,
     date_to: String,
 ) -> Result<DashboardStats, String> {
+    crate::commands::auth::require_screen_access("dashboard")?;
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, fetch dashboard stats from Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let url = format!("http://{}:{}/api/dashboard/stats", host_ip, host_port);
+        let resp = client.get(&url)
+            .query(&[("date_from", &date_from), ("date_to", &date_to)])
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Host returned error: {}", resp.status()));
+        }
+
+        let stats: DashboardStats = resp.json()
+            .map_err(|e| format!("Invalid dashboard stats response from Host: {}", e))?;
+        return Ok(stats);
+    }
     
     let stats = db.conn.query_row(
         "SELECT
@@ -37,6 +60,8 @@ pub fn get_dashboard_stats(
                 total_discount_paise: row.get(2)?,
                 total_gst_paise: row.get(3)?,
                 avg_bill_paise: if total_bills > 0 { total_sales / total_bills } else { 0 },
+                total_expenses_paise: None,
+                net_income_paise: None,
             })
         },
     ).map_err(|e| format!("Stats query error: {}", e))?;
@@ -51,17 +76,54 @@ pub fn get_dashboard_stats(
         rusqlite::params![date_from, date_to],
         |row| row.get(0),
     ).unwrap_or(0);
+
+    // Get total expenses for the period
+    let total_expenses: i64 = db.conn.query_row(
+        "SELECT COALESCE(SUM(amount_paise), 0)
+         FROM expenses
+         WHERE status = 'active'
+           AND expense_date >= ?1 AND expense_date <= ?2",
+        rusqlite::params![date_from, date_to],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    let net_income = stats.total_sales_paise - total_expenses;
     
     Ok(DashboardStats {
         total_items_sold: total_items,
+        total_expenses_paise: Some(total_expenses),
+        net_income_paise: Some(net_income),
         ..stats
     })
 }
 
 #[tauri::command]
 pub fn get_recent_bills(state: State<'_, AppState>, limit: Option<i32>) -> Result<Vec<Bill>, String> {
+    crate::commands::auth::require_screen_access("dashboard")?;
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
     let limit = limit.unwrap_or(10);
+
+    // If in Client mode, fetch recent bills from Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let url = format!("http://{}:{}/api/dashboard/recent", host_ip, host_port);
+        let resp = client.get(&url)
+            .query(&[("limit", limit.to_string())])
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Host returned error: {}", resp.status()));
+        }
+
+        let bills: Vec<Bill> = resp.json()
+            .map_err(|e| format!("Invalid recent bills response from Host: {}", e))?;
+        return Ok(bills);
+    }
     
     let mut stmt = db.conn.prepare(
         "SELECT b.id, b.bill_uuid, b.bill_number, b.business_date, b.bill_time,
@@ -72,7 +134,7 @@ pub fn get_recent_bills(state: State<'_, AppState>, limit: Option<i32>) -> Resul
          FROM bills b
          LEFT JOIN users u ON b.user_id = u.id
          LEFT JOIN payments p ON b.id = p.bill_id
-         ORDER BY b.created_at DESC
+         ORDER BY b.id DESC
          LIMIT ?1"
     ).map_err(|e| format!("Query error: {}", e))?;
     
@@ -109,7 +171,29 @@ pub fn get_sales_trend(
     date_from: String,
     date_to: String,
 ) -> Result<Vec<SalesTrendItem>, String> {
+    crate::commands::auth::require_screen_access("dashboard")?;
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
+
+    // If in Client mode, fetch sales trend from Host PC
+    if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let url = format!("http://{}:{}/api/dashboard/trend", host_ip, host_port);
+        let resp = client.get(&url)
+            .send()
+            .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Host returned error: {}", resp.status()));
+        }
+
+        let trend: Vec<SalesTrendItem> = resp.json()
+            .map_err(|e| format!("Invalid sales trend response from Host: {}", e))?;
+        return Ok(trend);
+    }
     
     let mut stmt = db.conn.prepare(
         "SELECT business_date,

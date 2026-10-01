@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Eye, Ban, RotateCcw, CheckCircle2, Printer } from 'lucide-react';
+import { Search, Eye, Ban, RotateCcw, CheckCircle2, Printer, Calendar } from 'lucide-react';
 import { api } from '../../lib/ipc';
-import { formatCurrency, getTodayDateString } from '../../lib/format';
+import { formatCurrency, getTodayDateString, formatDateDMY } from '../../lib/format';
 import { Modal } from '../../components/Modal';
 import { Header } from '../../components/Header';
 import { ReceiptPrintModal } from '../../components/ReceiptPrintModal';
+import { CustomSelect } from '../../components/CustomSelect';
 import { useAuth } from '../../contexts/AuthContext';
-import type { Bill, BillDetail, BillItem, ReturnBillItem } from '../../types';
+import { useSettings } from '../../contexts/SettingsContext';
+import type { Bill, BillDetail, BillItem, ReturnBillItem, Category } from '../../types';
 import toast from 'react-hot-toast';
 
 // Return item state tracker
@@ -18,10 +20,13 @@ interface ReturnItemState {
 
 export const BillsPage: React.FC = () => {
   const todayStr = getTodayDateString();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
+  const { gstEnabled } = useSettings();
   const [bills, setBills] = useState<Bill[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -46,6 +51,10 @@ export const BillsPage: React.FC = () => {
   const [isReturnLoading, setIsReturnLoading] = useState(false);
   const [isReturning, setIsReturning] = useState(false);
 
+  useEffect(() => {
+    api.getCategories(true).then(setCategories).catch(() => {});
+  }, []);
+
   const loadBills = async () => {
     setIsLoading(true);
     try {
@@ -53,6 +62,7 @@ export const BillsPage: React.FC = () => {
         businessDate: selectedDate || undefined,
         status: selectedStatus || undefined,
         search: searchQuery.trim() || undefined,
+        categoryId: selectedCategory ? Number(selectedCategory) : undefined,
         page: 1,
         pageSize: 100,
       });
@@ -69,7 +79,7 @@ export const BillsPage: React.FC = () => {
       loadBills();
     }, searchQuery ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [selectedDate, selectedStatus, searchQuery]);
+  }, [selectedDate, selectedStatus, selectedCategory, searchQuery]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -175,7 +185,7 @@ export const BillsPage: React.FC = () => {
       if (item.selected) {
         const itemBase = item.billItem.unit_price_paise * item.returnQty;
         const itemGst =
-          item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0
+          gstEnabled && item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0
             ? Math.round((itemBase * item.billItem.gst_percentage_x100) / 10000)
             : 0;
         rawTotal += itemBase + itemGst;
@@ -310,52 +320,70 @@ export const BillsPage: React.FC = () => {
 
       <div className="p-6 overflow-y-auto flex-1 space-y-4">
         {/* Filters Bar */}
-        <div className="card p-3 flex items-center justify-between gap-3 bg-white flex-wrap">
+        <div className="card p-3 flex items-center justify-between gap-3 bg-white flex-wrap shadow-xs">
           <form onSubmit={handleSearchSubmit} className="relative flex-1 min-w-[240px]">
-            <Search className="w-4 h-4 text-surface-400 absolute left-3 top-3" />
+            <Search className="w-4 h-4 text-surface-400 absolute left-3 top-2.5 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by bill number or staff name..."
-              className="form-input pl-9 text-sm"
+              className="form-input pl-9 text-xs h-9"
             />
           </form>
 
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 text-sm text-surface-600">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-surface-50 px-2.5 py-1 rounded-lg border border-surface-200 h-9">
+              <Calendar className="w-3.5 h-3.5 text-primary-600 flex-shrink-0" />
               <input
                 type="date"
                 value={selectedDate}
                 max={todayStr}
                 onChange={(e) => setSelectedDate(e.target.value)}
-                className="form-input text-sm py-1"
+                className="bg-transparent border-0 text-xs font-mono font-semibold text-surface-800 p-0 focus:ring-0 cursor-pointer w-28"
                 title="Filter by business date (up to today)"
               />
             </div>
 
-            <select
+            <CustomSelect
               value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="form-select text-sm py-1"
-            >
-              <option value="">All Statuses</option>
-              <option value="completed">Completed</option>
-              <option value="returned">Returned (Partial)</option>
-              <option value="cancelled">Cancelled (Full Return)</option>
-              <option value="voided">Voided</option>
-            </select>
+              onChange={setSelectedStatus}
+              options={[
+                { value: '', label: 'All Statuses' },
+                { value: 'completed', label: 'Completed' },
+                { value: 'returned', label: 'Returned (Partial)' },
+                { value: 'cancelled', label: 'Cancelled (Full Return)' },
+                { value: 'voided', label: 'Voided' },
+              ]}
+              size="md"
+              buttonClassName="w-36 h-9 text-xs font-medium rounded-lg"
+            />
 
-            {(selectedDate || selectedStatus || searchQuery) && (
+            <CustomSelect
+              value={selectedCategory}
+              onChange={setSelectedCategory}
+              options={[
+                { value: '', label: 'All Categories' },
+                ...categories.map((c) => ({ value: String(c.id), label: c.name })),
+              ]}
+              size="md"
+              buttonClassName="w-36 h-9 text-xs font-medium rounded-lg"
+            />
+
+            {(selectedDate || selectedStatus || selectedCategory || searchQuery) && (
               <button
+                type="button"
                 onClick={() => {
                   setSelectedDate('');
                   setSelectedStatus('');
+                  setSelectedCategory('');
                   setSearchQuery('');
                 }}
-                className="text-sm text-surface-500 hover:text-surface-700 underline px-1"
+                className="h-9 px-3 text-xs font-semibold text-surface-600 hover:text-primary-600 bg-surface-50 hover:bg-surface-100 rounded-lg border border-surface-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Reset all filters"
               >
-                Reset
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset</span>
               </button>
             )}
           </div>
@@ -409,7 +437,7 @@ export const BillsPage: React.FC = () => {
                         #{b.bill_number}
                       </td>
                       <td className="text-surface-700 font-mono">
-                        {b.business_date} {b.bill_time}
+                        {formatDateDMY(b.business_date)} {b.bill_time}
                       </td>
                       <td className="font-medium text-surface-800">
                         {b.user_name || 'Staff'}
@@ -471,13 +499,23 @@ export const BillsPage: React.FC = () => {
                             </span>
                           ) : null}
 
-                          {/* Void Button — available on completed and returned bills for Admin & Staff */}
+                          {/* Void Button — strictly requires Admin authorization */}
                           {(b.status === 'completed' || b.status === 'returned') ? (
                             <button
                               type="button"
-                              onClick={() => handleOpenVoid(b)}
-                              className="p-1.5 text-surface-500 hover:text-red-600 rounded hover:bg-red-50 transition-colors cursor-pointer"
-                              title="Void Bill"
+                              onClick={() => {
+                                if (!isAdmin) {
+                                  toast.error('Only Admin has authorization to void completed bills');
+                                  return;
+                                }
+                                handleOpenVoid(b);
+                              }}
+                              className={`p-1.5 rounded transition-colors cursor-pointer ${
+                                isAdmin
+                                  ? 'text-surface-500 hover:text-red-600 hover:bg-red-50'
+                                  : 'text-surface-300 hover:text-surface-400'
+                              }`}
+                              title={isAdmin ? 'Void Bill (Admin)' : 'Void Bill (Admin Authorization Required)'}
                             >
                               <Ban className="w-4 h-4" />
                             </button>
@@ -510,6 +548,7 @@ export const BillsPage: React.FC = () => {
             : 'Loading Bill...'
         }
         maxWidth="lg"
+        closeOnBackdropClick={false}
         footer={
           selectedBillDetail && (
             <div className="flex items-center justify-between w-full">
@@ -545,7 +584,7 @@ export const BillsPage: React.FC = () => {
               <div>
                 <span className="text-surface-500 block">Date & Time:</span>
                 <span className="font-mono font-semibold">
-                  {selectedBillDetail.bill.business_date}{' '}
+                  {formatDateDMY(selectedBillDetail.bill.business_date)}{' '}
                   {selectedBillDetail.bill.bill_time}
                 </span>
               </div>
@@ -623,7 +662,7 @@ export const BillsPage: React.FC = () => {
                   </span>
                 </div>
               )}
-              {selectedBillDetail.bill.gst_total_paise > 0 && (
+              {gstEnabled && selectedBillDetail.bill.gst_total_paise > 0 && (
                 <div className="flex justify-between text-surface-600">
                   <span>GST:</span>
                   <span className="font-mono">
@@ -663,6 +702,7 @@ export const BillsPage: React.FC = () => {
           onClose={() => setIsPrintModalOpen(false)}
           title={`Print Bill #${selectedBillDetail.bill.bill_number}`}
           billData={{
+            billId: selectedBillDetail.bill.id,
             billNumber: selectedBillDetail.bill.bill_number,
             billUuid: selectedBillDetail.bill.bill_uuid,
             businessDate: selectedBillDetail.bill.business_date,
@@ -683,7 +723,9 @@ export const BillsPage: React.FC = () => {
             grandTotalPaise: selectedBillDetail.bill.grand_total_paise,
             paymentMethod: selectedBillDetail.payment?.payment_method || selectedBillDetail.bill.payment_method || 'cash',
             tenderedCashPaise: selectedBillDetail.payment?.cash_amount_paise,
-            changeDuePaise: 0,
+            changeDuePaise: (selectedBillDetail.payment?.cash_amount_paise || 0) > selectedBillDetail.bill.grand_total_paise
+              ? (selectedBillDetail.payment?.cash_amount_paise || 0) - selectedBillDetail.bill.grand_total_paise
+              : 0,
           }}
         />
       )}
@@ -698,6 +740,7 @@ export const BillsPage: React.FC = () => {
             : 'Process Return'
         }
         maxWidth="lg"
+        closeOnBackdropClick={false}
         footer={
           <div className="flex items-center justify-between w-full">
             <button
@@ -768,7 +811,7 @@ export const BillsPage: React.FC = () => {
                   {returnItems.map((item, index) => {
                     const itemBase = item.billItem.unit_price_paise * item.returnQty;
                     const itemGst =
-                      item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0
+                      gstEnabled && item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0
                         ? Math.round((itemBase * item.billItem.gst_percentage_x100) / 10000)
                         : 0;
                     const lineRefund = itemBase + itemGst;
@@ -794,13 +837,11 @@ export const BillsPage: React.FC = () => {
                         </td>
                         <td className="text-right font-mono">
                           <div>{formatCurrency(item.billItem.unit_price_paise)}</div>
-                          {item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0 ? (
+                          {gstEnabled && item.billItem.gst_enabled && item.billItem.gst_percentage_x100 > 0 ? (
                             <span className="inline-block text-2xs text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200">
                               +{(item.billItem.gst_percentage_x100 / 100).toFixed(0)}% GST
                             </span>
-                          ) : (
-                            <span className="text-2xs text-surface-400 block font-sans">No GST</span>
-                          )}
+                          ) : null}
                         </td>
                         <td className="text-center font-mono font-bold">
                           {item.billItem.quantity}
@@ -917,6 +958,7 @@ export const BillsPage: React.FC = () => {
         onClose={() => setIsVoidOpen(false)}
         title={voidingBill ? `Void Bill #${voidingBill.bill_number}` : 'Void Bill'}
         maxWidth="md"
+        closeOnBackdropClick={false}
         footer={
           <div className="flex items-center justify-end gap-2 w-full">
             <button

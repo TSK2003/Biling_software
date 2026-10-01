@@ -8,6 +8,8 @@ interface ModalProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl';
+  closeOnBackdropClick?: boolean;
+  closeOnEscape?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -17,11 +19,17 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   footer,
   maxWidth = 'md',
+  closeOnBackdropClick = false,
+  closeOnEscape = false,
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
+      // Only close on Escape if explicitly enabled AND not currently focused on an input/textarea/select
+      if (closeOnEscape && e.key === 'Escape') {
+        const activeTag = document.activeElement?.tagName?.toLowerCase();
+        if (activeTag !== 'input' && activeTag !== 'textarea' && activeTag !== 'select') {
+          onClose();
+        }
       }
     };
 
@@ -34,7 +42,7 @@ export const Modal: React.FC<ModalProps> = ({
       document.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, closeOnEscape]);
 
   if (!isOpen) return null;
 
@@ -48,10 +56,20 @@ export const Modal: React.FC<ModalProps> = ({
   }[maxWidth];
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div
+      className="modal-backdrop"
+      onClick={(e) => {
+        // Prevent click if event target was not the backdrop itself
+        if (closeOnBackdropClick && e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
         className={`modal w-full ${maxWidthClasses} mx-4`}
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
           <h3 className="text-sm font-bold text-surface-900">{title}</h3>

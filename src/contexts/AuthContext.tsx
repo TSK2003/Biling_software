@@ -16,7 +16,15 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  // Synchronously initialize from persistent localStorage to eliminate auth race conditions on reload
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const raw = localStorage.getItem('billing_user') || sessionStorage.getItem('billing_user');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
   const [isLoading, setIsLoading] = useState(true);
 
   const refreshUser = async () => {
@@ -24,17 +32,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const currentUser = await api.getCurrentUser();
       if (currentUser) {
         setUser(currentUser);
-        sessionStorage.setItem('billing_user', JSON.stringify(currentUser));
+        localStorage.setItem('billing_user', JSON.stringify(currentUser));
         return;
       }
-      const raw = sessionStorage.getItem('billing_user');
+      const raw = localStorage.getItem('billing_user') || sessionStorage.getItem('billing_user');
       if (raw) {
         setUser(JSON.parse(raw));
       } else {
         setUser(null);
       }
     } catch {
-      const raw = sessionStorage.getItem('billing_user');
+      const raw = localStorage.getItem('billing_user') || sessionStorage.getItem('billing_user');
       if (raw) {
         try {
           setUser(JSON.parse(raw));
@@ -57,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await api.login(username, password);
       setUser(response.user);
-      sessionStorage.setItem('billing_user', JSON.stringify(response.user));
+      localStorage.setItem('billing_user', JSON.stringify(response.user));
       toast.success(`Welcome back, ${response.user.display_name}!`);
       return true;
     } catch (err: any) {
@@ -69,10 +77,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       await api.logout();
+      localStorage.removeItem('billing_user');
       sessionStorage.removeItem('billing_user');
       setUser(null);
       toast.success('Logged out successfully');
     } catch {
+      localStorage.removeItem('billing_user');
       sessionStorage.removeItem('billing_user');
       setUser(null);
     }
@@ -81,8 +91,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canAccess = (screen: ScreenPermission | string): boolean => {
     if (!user) return false;
     if (user.role === 'admin') return true;
-    if (!user.permissions || user.permissions.length === 0) {
-      return ['billing', 'bills', 'dashboard', 'products', 'categories', 'reports'].includes(screen as string);
+    if (screen === 'settings' || screen === 'users') return false;
+    if (!user.permissions) {
+      return screen === 'billing' || screen === 'bills';
     }
     return (user.permissions as string[]).includes(screen as string);
   };

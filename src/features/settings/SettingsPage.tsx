@@ -1,4 +1,5 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Store,
   Receipt,
@@ -7,10 +8,6 @@ import {
   Save,
   CheckCircle2,
   AlertTriangle,
-  Cloud,
-  ExternalLink,
-  HelpCircle,
-  Link as LinkIcon,
   Wifi,
   Server,
   Monitor,
@@ -19,14 +16,47 @@ import {
   Upload,
   Trash2,
   ShieldCheck,
+  HardDrive,
+  FileText,
+  Layers,
+  Loader2,
+  Play,
+  KeyRound,
+  Usb,
 } from 'lucide-react';
+import type { PrinterInfo, DriveInfo } from '../../types';
 import { api } from '../../lib/ipc';
 import { Header } from '../../components/Header';
+import { CustomSelect } from '../../components/CustomSelect';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useLicense } from '../../contexts/LicenseContext';
 import { useNetwork } from '../../contexts/NetworkContext';
 import { SetupModeModal } from '../network/SetupModeModal';
+import { BackupPage } from '../backup/BackupPage';
+import { setGlobalCurrencySymbol } from '../../lib/format';
 import toast from 'react-hot-toast';
+
+export const CURRENCY_OPTIONS = [
+  { value: '₹', code: 'INR', label: '₹ — INR (Indian Rupee)' },
+  { value: '$', code: 'USD', label: '$ — USD (US Dollar)' },
+  { value: '€', code: 'EUR', label: '€ — EUR (Euro)' },
+  { value: '£', code: 'GBP', label: '£ — GBP (British Pound)' },
+  { value: 'AED ', code: 'AED', label: 'AED — UAE Dirham' },
+  { value: 'SAR ', code: 'SAR', label: 'SAR — Saudi Riyal' },
+  { value: 'S$', code: 'SGD', label: 'S$ — Singapore Dollar' },
+  { value: 'RM ', code: 'MYR', label: 'RM — Malaysian Ringgit' },
+  { value: 'A$', code: 'AUD', label: 'A$ — Australian Dollar' },
+  { value: 'C$', code: 'CAD', label: 'C$ — Canadian Dollar' },
+  { value: '¥', code: 'JPY', label: '¥ — Japanese Yen' },
+  { value: 'CUSTOM', code: 'CUSTOM', label: 'Other / Custom Symbol...' },
+];
+
+export const getCurrencyCodeForSymbol = (sym: string): string => {
+  if (!sym) return 'INR';
+  const clean = sym.trim();
+  const match = CURRENCY_OPTIONS.find((o) => o.value.trim() === clean && o.code !== 'CUSTOM');
+  return match ? match.code : 'CUSTOM';
+};
 
 export const SettingsPage: React.FC = () => {
   const { settings, updateSetting, reloadSettings } = useSettings();
@@ -39,10 +69,26 @@ export const SettingsPage: React.FC = () => {
     revokeDevice,
   } = useNetwork();
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<
-    'shop' | 'gst' | 'printer' | 'gdrive' | 'network' | 'license' | 'danger'
-  >('shop');
-  const [isSetupModalOpen, setIsSetupModalOpen] = useState(false);
+    'shop' | 'gst' | 'printer' | 'network' | 'backup' | 'license' | 'danger'
+  >(() => {
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab && ['shop', 'gst', 'printer', 'network', 'backup', 'license', 'danger'].includes(tab)) {
+      return tab as any;
+    }
+    return 'shop';
+  });
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && ['shop', 'gst', 'printer', 'network', 'backup', 'license', 'danger'].includes(tab)) {
+      setActiveTab(tab as any);
+    }
+  }, [searchParams]);
+
+  const isSetupModalOpenState = useState(false);
+  const [isSetupModalOpen, setIsSetupModalOpen] = isSetupModalOpenState;
 
   // Form states
   const [shopName, setShopName] = useState(settings['shop_name'] || 'My Shop');
@@ -51,7 +97,14 @@ export const SettingsPage: React.FC = () => {
   const [shopEmail, setShopEmail] = useState(settings['shop_email'] || '');
   const [fssaiNumber, setFssaiNumber] = useState(settings['fssai_number'] || '');
   const [receiptFooter, setReceiptFooter] = useState(settings['receipt_footer_note'] || 'Thank you for shopping with us! Please visit again.');
-  const [currencySymbol, setCurrencySymbol] = useState(settings['currency_symbol'] || '₹');
+  const [selectedCurrencyCode, setSelectedCurrencyCode] = useState<string>(() => {
+    return getCurrencyCodeForSymbol(settings['currency_symbol'] || '₹');
+  });
+  const [customCurrencySymbol, setCustomCurrencySymbol] = useState<string>(() => {
+    const cur = settings['currency_symbol'] || '₹';
+    const code = getCurrencyCodeForSymbol(cur);
+    return code === 'CUSTOM' ? cur : '';
+  });
   const [shopLogo, setShopLogo] = useState(settings['shop_logo'] || '');
   const logoInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,18 +112,67 @@ export const SettingsPage: React.FC = () => {
   const [gstNumber, setGstNumber] = useState(settings['gst_number'] || '');
   const [gstDefaultPct, setGstDefaultPct] = useState(settings['gst_default_percentage'] || '500');
 
-  const [printerPaper, setPrinterPaper] = useState(settings['printer_paper_size'] || 'Thermal80');
-  const [printerCopies, setPrinterCopies] = useState(settings['printer_copies'] || '1');
+  const [printerPaper, setPrinterPaper] = useState<string>(() => {
+    return settings['printer_paper_size'] || localStorage.getItem('pos_saved_paper_size') || 'Thermal80';
+  });
+  const [printerCopies, setPrinterCopies] = useState<string>(() => {
+    return settings['printer_copies'] || localStorage.getItem('pos_saved_printer_copies') || '1';
+  });
+  const [selectedPrinter, setSelectedPrinter] = useState<string>(() => {
+    return settings['printer_name'] || localStorage.getItem('pos_saved_printer_name') || '';
+  });
+  const [installedPrinters, setInstalledPrinters] = useState<PrinterInfo[]>([]);
+  const [systemDefaultPrinter, setSystemDefaultPrinter] = useState<string | null>(null);
+  const [isLoadingPrinters, setIsLoadingPrinters] = useState(false);
+  const [isTestingPrinter, setIsTestingPrinter] = useState(false);
   const [defaultPayment, setDefaultPayment] = useState(settings['default_payment_method'] || 'cash');
-
-  // Google Drive State
-  const [driveFolderId, setDriveFolderId] = useState(settings['gdrive_folder_id'] || '');
-  const [autoDriveSync, setAutoDriveSync] = useState(settings['gdrive_auto_sync'] === 'true');
 
   // Factory Reset State
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState('');
   const [isResetting, setIsResetting] = useState(false);
+
+  // USB Security Key Burning State
+  const [drives, setDrives] = useState<DriveInfo[]>([]);
+  const [selectedDriveForBurn, setSelectedDriveForBurn] = useState<string>('');
+  const [isBurningKey, setIsBurningKey] = useState<boolean>(false);
+  const [isLoadingDrives, setIsLoadingDrives] = useState<boolean>(false);
+
+  const loadDrives = async () => {
+    setIsLoadingDrives(true);
+    try {
+      const list = await api.getAllDrives();
+      setDrives(list);
+      if (list.length > 0 && !selectedDriveForBurn) {
+        // Prefer removable drives if present, else first drive
+        const rem = list.find((d) => d.is_removable || d.letter !== 'C:');
+        setSelectedDriveForBurn(rem ? rem.letter : list[0].letter);
+      }
+    } catch {
+      setDrives([]);
+    } finally {
+      setIsLoadingDrives(false);
+    }
+  };
+
+  const handleBurnUsbKey = async () => {
+    if (!selectedDriveForBurn) {
+      toast.error('Please select an inserted USB pen drive');
+      return;
+    }
+    setIsBurningKey(true);
+    const toastId = toast.loading(`Writing single-use security key to drive ${selectedDriveForBurn}...`);
+    try {
+      const msg = await api.createUsbSecurityKey(selectedDriveForBurn, shopName);
+      toast.success(msg || 'Security key successfully written to pen drive!', { id: toastId, duration: 6000 });
+      await loadDrives();
+    } catch (err: any) {
+      const errMsg = typeof err === 'string' ? err : (err?.message || 'Failed to burn security key');
+      toast.error(errMsg, { id: toastId, duration: 6000 });
+    } finally {
+      setIsBurningKey(false);
+    }
+  };
 
   const [isSaving, setIsSaving] = useState(false);
 
@@ -107,15 +209,20 @@ export const SettingsPage: React.FC = () => {
     e.preventDefault();
     setIsSaving(true);
     try {
+      const finalCurrency = selectedCurrencyCode === 'CUSTOM'
+        ? (customCurrencySymbol.trim() || '₹')
+        : (CURRENCY_OPTIONS.find((o) => o.code === selectedCurrencyCode)?.value || '₹');
+
       await updateSetting('shop_name', shopName.trim());
       await updateSetting('shop_phone', shopPhone.trim());
       await updateSetting('shop_address', shopAddress.trim());
       await updateSetting('shop_email', shopEmail.trim());
       await updateSetting('fssai_number', fssaiNumber.trim());
       await updateSetting('receipt_footer_note', receiptFooter.trim());
-      await updateSetting('currency_symbol', currencySymbol.trim());
+      await updateSetting('currency_symbol', finalCurrency);
       await updateSetting('default_payment_method', defaultPayment);
       await updateSetting('shop_logo', shopLogo);
+      setGlobalCurrencySymbol(finalCurrency);
       await reloadSettings();
       toast.success('Shop profile & receipt details updated successfully');
     } catch {
@@ -148,10 +255,14 @@ export const SettingsPage: React.FC = () => {
 
   const handleSaveGst = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (gstEnabled && gstNumber.trim() && gstNumber.trim().length !== 13) {
+      toast.error('GST number must be fixed at exactly 13 characters');
+      return;
+    }
     setIsSaving(true);
     try {
       await updateSetting('gst_enabled', gstEnabled ? 'true' : 'false');
-      await updateSetting('gst_number', gstNumber.trim());
+      await updateSetting('gst_number', gstNumber.trim().toUpperCase());
       await updateSetting('gst_default_percentage', gstDefaultPct);
       await reloadSettings();
       toast.success('GST tax configuration saved');
@@ -166,10 +277,16 @@ export const SettingsPage: React.FC = () => {
     e.preventDefault();
     setIsSaving(true);
     try {
+      await updateSetting('printer_name', selectedPrinter);
       await updateSetting('printer_paper_size', printerPaper);
       await updateSetting('printer_copies', printerCopies);
+
+      localStorage.setItem('pos_saved_printer_name', selectedPrinter);
+      localStorage.setItem('pos_saved_paper_size', printerPaper);
+      localStorage.setItem('pos_saved_printer_copies', printerCopies);
+
       await reloadSettings();
-      toast.success('Printer preferences saved');
+      toast.success('Printer preferences saved permanently');
     } catch {
       toast.error('Failed to save printer settings');
     } finally {
@@ -177,45 +294,96 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleSaveDrive = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSaving(true);
+  const handleTestPrint = async () => {
+    if (isTestingPrinter) return;
+    setIsTestingPrinter(true);
     try {
-      let cleanedId = driveFolderId.trim();
-      if (cleanedId.includes('folders/')) {
-        const match = cleanedId.match(/folders\/([a-zA-Z0-9-_]+)/);
-        if (match && match[1]) {
-          cleanedId = match[1];
-          setDriveFolderId(cleanedId);
-        }
-      }
-      await updateSetting('gdrive_folder_id', cleanedId);
-      await updateSetting('gdrive_auto_sync', autoDriveSync ? 'true' : 'false');
-      await reloadSettings();
-      toast.success('Google Drive Cloud Backup configured');
-    } catch {
-      toast.error('Failed to save Google Drive settings');
+      const res = await api.testPrint(selectedPrinter || undefined, printerPaper);
+      toast.success(res || 'Test page sent to printer successfully!');
+    } catch (err: any) {
+      console.error('Test print failed:', err);
+      const msg = typeof err === 'string' ? err : err?.message || 'Unable to print test ticket. Please verify printer connection.';
+      toast.error(msg);
     } finally {
-      setIsSaving(false);
+      setIsTestingPrinter(false);
     }
   };
+
+  const loadInstalledPrinters = async () => {
+    setIsLoadingPrinters(true);
+    try {
+      const [printers, defPrinter] = await Promise.all([
+        api.getPrinters().catch(() => [] as PrinterInfo[]),
+        api.getDefaultPrinter().catch(() => null),
+      ]);
+      setInstalledPrinters(printers);
+      setSystemDefaultPrinter(defPrinter);
+    } catch (err) {
+      console.error('Failed to load installed printers:', err);
+    } finally {
+      setIsLoadingPrinters(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'printer') {
+      loadInstalledPrinters();
+    } else if (activeTab === 'license') {
+      loadDrives();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (settings['shop_name']) setShopName(settings['shop_name']);
+    if (settings['shop_phone']) setShopPhone(settings['shop_phone']);
+    if (settings['shop_address']) setShopAddress(settings['shop_address']);
+    if (settings['shop_email']) setShopEmail(settings['shop_email']);
+    if (settings['fssai_number']) setFssaiNumber(settings['fssai_number']);
+    if (settings['receipt_footer_note']) setReceiptFooter(settings['receipt_footer_note']);
+    if (settings['shop_logo']) setShopLogo(settings['shop_logo']);
+    if (settings['default_payment_method']) setDefaultPayment(settings['default_payment_method']);
+    if (settings['printer_paper_size']) {
+      setPrinterPaper(settings['printer_paper_size']);
+      localStorage.setItem('pos_saved_paper_size', settings['printer_paper_size']);
+    }
+    if (settings['printer_copies']) {
+      setPrinterCopies(settings['printer_copies']);
+      localStorage.setItem('pos_saved_printer_copies', settings['printer_copies']);
+    }
+    if (settings['printer_name'] !== undefined) {
+      setSelectedPrinter(settings['printer_name']);
+      localStorage.setItem('pos_saved_printer_name', settings['printer_name']);
+    }
+    if (settings['currency_symbol']) {
+      const cur = settings['currency_symbol'];
+      const code = getCurrencyCodeForSymbol(cur);
+      setSelectedCurrencyCode(code);
+      if (code === 'CUSTOM') {
+        setCustomCurrencySymbol(cur);
+      }
+    }
+  }, [settings]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-surface-50">
       <Header
         title="Application Settings"
-        subtitle="Configure shop identity, GST taxes, printing, Google Drive cloud sync, and security keys"
+        subtitle="Configure shop identity, GST taxes, bill printing, network devices, and license security"
       />
 
       <div className="p-6 overflow-y-auto flex-1 w-full space-y-5">
         {/* Settings Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-surface-200 pb-2">
+        <div className="bg-white p-1.5 rounded-2xl border border-surface-200/90 shadow-2xs flex items-center gap-1.5 flex-wrap">
           <button
-            onClick={() => setActiveTab('shop')}
-            className={`px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+            type="button"
+            onClick={() => {
+              setActiveTab('shop');
+              setSearchParams({ tab: 'shop' });
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
               activeTab === 'shop'
-                ? 'bg-primary-600 text-white'
-                : 'text-surface-600 hover:bg-surface-100'
+                ? 'bg-primary-600 text-white shadow-xs'
+                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
             }`}
           >
             <Store className="w-3.5 h-3.5" />
@@ -223,11 +391,15 @@ export const SettingsPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('gst')}
-            className={`px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+            type="button"
+            onClick={() => {
+              setActiveTab('gst');
+              setSearchParams({ tab: 'gst' });
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
               activeTab === 'gst'
-                ? 'bg-primary-600 text-white'
-                : 'text-surface-600 hover:bg-surface-100'
+                ? 'bg-primary-600 text-white shadow-xs'
+                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
             }`}
           >
             <Receipt className="w-3.5 h-3.5" />
@@ -235,11 +407,15 @@ export const SettingsPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('printer')}
-            className={`px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+            type="button"
+            onClick={() => {
+              setActiveTab('printer');
+              setSearchParams({ tab: 'printer' });
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
               activeTab === 'printer'
-                ? 'bg-primary-600 text-white'
-                : 'text-surface-600 hover:bg-surface-100'
+                ? 'bg-primary-600 text-white shadow-xs'
+                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
             }`}
           >
             <Printer className="w-3.5 h-3.5" />
@@ -247,23 +423,15 @@ export const SettingsPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('gdrive')}
-            className={`px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors ${
-              activeTab === 'gdrive'
-                ? 'bg-primary-600 text-white'
-                : 'text-surface-600 hover:bg-surface-100'
-            }`}
-          >
-            <Cloud className="w-3.5 h-3.5" />
-            <span>Google Drive Sync</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('network')}
-            className={`px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+            type="button"
+            onClick={() => {
+              setActiveTab('network');
+              setSearchParams({ tab: 'network' });
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
               activeTab === 'network'
-                ? 'bg-primary-600 text-white'
-                : 'text-surface-600 hover:bg-surface-100'
+                ? 'bg-primary-600 text-white shadow-xs'
+                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
             }`}
           >
             <Wifi className="w-3.5 h-3.5" />
@@ -271,23 +439,49 @@ export const SettingsPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setActiveTab('license')}
-            className={`px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+            type="button"
+            onClick={() => {
+              setActiveTab('backup');
+              setSearchParams({ tab: 'backup' });
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'backup'
+                ? 'bg-primary-600 text-white shadow-xs'
+                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
+            }`}
+          >
+            <HardDrive className="w-3.5 h-3.5" />
+            <span>Backup & Restore</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('license');
+              setSearchParams({ tab: 'license' });
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
               activeTab === 'license'
-                ? 'bg-primary-600 text-white'
-                : 'text-surface-600 hover:bg-surface-100'
+                ? 'bg-primary-600 text-white shadow-xs'
+                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
             }`}
           >
             <Shield className="w-3.5 h-3.5" />
             <span>License & Security</span>
           </button>
 
+          <div className="h-5 w-px bg-surface-200 mx-1 hidden sm:block" />
+
           <button
-            onClick={() => setActiveTab('danger')}
-            className={`px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 transition-colors ${
+            type="button"
+            onClick={() => {
+              setActiveTab('danger');
+              setSearchParams({ tab: 'danger' });
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ml-auto ${
               activeTab === 'danger'
                 ? 'bg-red-600 text-white shadow-xs'
-                : 'text-red-600 hover:bg-red-50'
+                : 'text-red-600 hover:bg-red-50 hover:text-red-700'
             }`}
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -375,9 +569,9 @@ export const SettingsPage: React.FC = () => {
               <textarea
                 value={shopAddress}
                 onChange={(e) => setShopAddress(e.target.value)}
-                placeholder="Shop Address"
-                rows={2}
-                className="form-input resize-none"
+                placeholder="Enter complete shop address (Street, Area, City, Pincode)"
+                rows={3}
+                className="w-full min-h-[90px] p-3 text-sm text-surface-900 bg-white border border-surface-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 placeholder:text-surface-400 transition-all resize-y shadow-xs font-sans leading-relaxed"
               />
             </div>
 
@@ -394,7 +588,7 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">FSSAI / Shop License No (Optional)</label>
+                <label className="form-label">FSSAI / License Number</label>
                 <input
                   type="text"
                   value={fssaiNumber}
@@ -402,6 +596,9 @@ export const SettingsPage: React.FC = () => {
                   placeholder="FSSAI License / Registration No"
                   className="form-input font-mono"
                 />
+                <p className="text-2xs text-surface-500 mt-1">
+                  Printed permanently on all bill receipts whenever details are provided.
+                </p>
               </div>
             </div>
 
@@ -419,30 +616,62 @@ export const SettingsPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
               <div className="form-group">
-                <label className="form-label">Currency Symbol</label>
-                <input
-                  type="text"
-                  value={currencySymbol}
-                  onChange={(e) => setCurrencySymbol(e.target.value)}
-                  className="form-input font-mono"
-                  required
+                <label className="form-label flex items-center justify-between">
+                  <span>Currency Type</span>
+                  <span className="text-2xs font-normal text-surface-400">Select currency</span>
+                </label>
+                <CustomSelect
+                  value={selectedCurrencyCode}
+                  onChange={(val) => {
+                    setSelectedCurrencyCode(val);
+                    if (val !== 'CUSTOM') {
+                      const sym = CURRENCY_OPTIONS.find((c) => c.code === val)?.value || '₹';
+                      setGlobalCurrencySymbol(sym);
+                    }
+                  }}
+                  options={CURRENCY_OPTIONS.map((c) => ({
+                    value: c.code,
+                    label: c.label,
+                  }))}
+                  size="lg"
+                  buttonClassName="w-full h-10 text-sm font-medium rounded-lg"
                 />
+                {selectedCurrencyCode === 'CUSTOM' && (
+                  <div className="pt-2">
+                    <label className="text-2xs font-medium text-surface-600 mb-1 block">
+                      Custom Currency Symbol (e.g. ৳, ฿, ₱)
+                    </label>
+                    <input
+                      type="text"
+                      value={customCurrencySymbol}
+                      onChange={(e) => setCustomCurrencySymbol(e.target.value)}
+                      placeholder="e.g. ৳"
+                      className="form-input h-10 text-sm font-mono"
+                      required
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
-                <label className="form-label">Default Payment Method</label>
-                <select
+                <label className="form-label flex items-center justify-between">
+                  <span>Default Payment Method</span>
+                  <span className="text-2xs font-normal text-surface-400">POS checkout default</span>
+                </label>
+                <CustomSelect
                   value={defaultPayment}
-                  onChange={(e) => setDefaultPayment(e.target.value)}
-                  className="form-select"
-                >
-                  <option value="cash">Cash</option>
-                  <option value="upi">UPI / QR Code</option>
-                  <option value="card">Card</option>
-                  <option value="upi_cash">UPI + Cash</option>
-                </select>
+                  onChange={setDefaultPayment}
+                  options={[
+                    { value: 'cash', label: 'Cash' },
+                    { value: 'upi', label: 'UPI / QR Code' },
+                    { value: 'card', label: 'Card' },
+                    { value: 'upi_cash', label: 'UPI + Cash' },
+                  ]}
+                  size="lg"
+                  buttonClassName="w-full h-10 text-sm font-medium rounded-lg"
+                />
               </div>
             </div>
 
@@ -491,14 +720,26 @@ export const SettingsPage: React.FC = () => {
             {gstEnabled && (
               <div className="grid grid-cols-2 gap-4 pt-2">
                 <div className="form-group">
-                  <label className="form-label">Shop GSTIN (GST Number)</label>
+                  <div className="flex items-center justify-between">
+                    <label className="form-label">Shop GSTIN (GST Number)</label>
+                    <span className="text-2xs font-mono text-surface-500 font-semibold">
+                      {gstNumber.length}/13
+                    </span>
+                  </div>
                   <input
                     type="text"
+                    maxLength={13}
                     value={gstNumber}
-                    onChange={(e) => setGstNumber(e.target.value)}
-                    placeholder="GSTIN (e.g. 22AAAAA0000A1Z5)"
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 13);
+                      setGstNumber(val);
+                    }}
+                    placeholder="Fixed 13 chars (e.g. 22AAAAA0000A1)"
                     className="form-input font-mono uppercase"
                   />
+                  <p className="text-2xs text-surface-500 mt-1">
+                    GST number is strictly fixed at 13 alphanumeric characters.
+                  </p>
                 </div>
 
                 <div className="form-group">
@@ -533,138 +774,243 @@ export const SettingsPage: React.FC = () => {
 
         {/* Tab 3: Printer Preferences */}
         {activeTab === 'printer' && (
-          <form onSubmit={handleSavePrinter} className="card p-5 space-y-4 bg-white">
-            <h3 className="text-sm font-bold text-surface-900 border-b border-surface-100 pb-2">
-              Receipt & Printer Format
-            </h3>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="form-group">
-                <label className="form-label">Paper Format</label>
-                <select
-                  value={printerPaper}
-                  onChange={(e) => setPrinterPaper(e.target.value)}
-                  className="form-select"
-                >
-                  <option value="Thermal80">Thermal Receipt (80mm / 3 inch) — Standard POS</option>
-                  <option value="Thermal58">Thermal Receipt (58mm / 2 inch) — Mini Thermal Printer</option>
-                  <option value="A4">Standard A4 Sheet</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Copies per Print</label>
-                <select
-                  value={printerCopies}
-                  onChange={(e) => setPrinterCopies(e.target.value)}
-                  className="form-select"
-                >
-                  <option value="1">1 Copy (Customer)</option>
-                  <option value="2">2 Copies (Customer + Shop)</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-surface-100 flex justify-end">
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="btn-primary text-xs flex items-center gap-1.5"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>{isSaving ? 'Saving...' : 'Save Printer Preferences'}</span>
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* Tab 4: Google Drive Sync */}
-        {activeTab === 'gdrive' && (
-          <form onSubmit={handleSaveDrive} className="card p-5 space-y-4 bg-white">
-            <div className="flex items-center justify-between border-b border-surface-100 pb-2">
-              <h3 className="text-sm font-bold text-surface-900 flex items-center gap-2">
-                <Cloud className="w-4 h-4 text-blue-600" />
-                <span>Google Drive Cloud Backup Settings</span>
-              </h3>
-              {driveFolderId && (
-                <a
-                  href={
-                    driveFolderId.startsWith('http')
-                      ? driveFolderId
-                      : `https://drive.google.com/drive/folders/${driveFolderId}`
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-2xs text-blue-600 hover:underline flex items-center gap-1"
-                >
-                  <span>Open Folder</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="form-group">
-                <label className="form-label">Google Drive Folder Link / ID *</label>
-                <div className="relative">
-                  <LinkIcon className="w-4 h-4 text-surface-400 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    value={driveFolderId}
-                    onChange={(e) => setDriveFolderId(e.target.value)}
-                    placeholder="Google Drive Folder ID or Link"
-                    className="form-input pl-9 text-xs font-mono"
-                  />
+          <form onSubmit={handleSavePrinter} className="space-y-5">
+            <div className="card p-6 space-y-6 bg-white border border-surface-200 shadow-sm">
+              <div className="flex items-center justify-between border-b border-surface-200/80 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-primary-100 text-primary-700 flex items-center justify-center flex-shrink-0">
+                    <Printer className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-surface-900">
+                      Receipt & Hardware Printer Settings
+                    </h3>
+                    <p className="text-xs text-surface-500 mt-0.5">
+                      Select your target hardware printer once, configure paper roll/sheet dimensions, and lock preferences permanently.
+                    </p>
+                  </div>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={loadInstalledPrinters}
+                  disabled={isLoadingPrinters}
+                  className="btn-secondary h-9 px-3 text-xs font-semibold flex items-center gap-1.5"
+                  title="Rescan connected USB and network printers"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingPrinters ? 'animate-spin text-primary-600' : ''}`} />
+                  <span>{isLoadingPrinters ? 'Detecting...' : 'Rescan Printers'}</span>
+                </button>
               </div>
 
-              <div className="form-group flex flex-col justify-between">
-                <label className="form-label">Auto-Sync Schedule</label>
-                <div className="flex items-center justify-between p-2.5 rounded-lg bg-surface-50 border border-surface-200">
-                  <span className="text-xs text-surface-700">Auto-upload daily backup snapshots</span>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={autoDriveSync}
-                      onChange={(e) => setAutoDriveSync(e.target.checked)}
-                      className="form-checkbox"
-                    />
-                    <span className="text-xs font-bold text-surface-800">
-                      {autoDriveSync ? 'ON' : 'OFF'}
+              {/* Grid with Printer Device, Paper Size, and Copies */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                {/* 1. Target Printer Selection */}
+                <div className="flex flex-col space-y-2">
+                  <div className="h-6 flex items-center justify-between">
+                    <label className="text-xs font-bold text-surface-800">
+                      Target Hardware Printer
+                    </label>
+                    <span className="badge badge-primary text-3xs font-extrabold uppercase tracking-wider">
+                      Auto-detected
                     </span>
-                  </label>
+                  </div>
+                  <CustomSelect
+                    value={selectedPrinter}
+                    onChange={(val) => {
+                      setSelectedPrinter(val);
+                      localStorage.setItem('pos_saved_printer_name', val);
+                    }}
+                    options={[
+                      {
+                        value: '',
+                        label: systemDefaultPrinter
+                          ? `Default System Printer (${systemDefaultPrinter})`
+                          : 'Default Windows System Printer (Auto)',
+                        icon: <Printer className="w-4 h-4 text-primary-600 flex-shrink-0" />,
+                      },
+                      ...installedPrinters.map((p) => ({
+                        value: p.name,
+                        label: `${p.name}${p.is_default ? ' [Default]' : ''}${p.is_online ? ' (Online)' : ''}`,
+                        icon: (
+                          <Printer
+                            className={`w-4 h-4 flex-shrink-0 ${
+                              p.is_online ? 'text-emerald-600' : 'text-surface-400'
+                            }`}
+                          />
+                        ),
+                      })),
+                      ...(selectedPrinter &&
+                      !installedPrinters.some((p) => p.name === selectedPrinter)
+                        ? [
+                            {
+                              value: selectedPrinter,
+                              label: `${selectedPrinter} (Saved Printer)`,
+                              icon: <Printer className="w-4 h-4 text-primary-600 flex-shrink-0" />,
+                            },
+                          ]
+                        : []),
+                    ]}
+                    className="w-full block"
+                    buttonClassName="w-full h-11 text-xs font-semibold rounded-xl justify-between shadow-2xs"
+                    dropdownClassName="w-full max-w-none shadow-xl max-h-72"
+                  />
+                  <p className="min-h-[2.5rem] flex items-start text-3xs text-surface-500 leading-relaxed">
+                    Select a connected thermal receipt printer or office laser printer. Your choice will remain locked permanently for all future bills.
+                  </p>
+                </div>
+
+                {/* 2. Paper Format Dropdown (All Sizes) */}
+                <div className="flex flex-col space-y-2">
+                  <div className="h-6 flex items-center justify-between">
+                    <label className="text-xs font-bold text-surface-800">
+                      Paper Format & Size
+                    </label>
+                    <span className="badge badge-neutral text-3xs font-mono font-bold">
+                      {printerPaper}
+                    </span>
+                  </div>
+                  <CustomSelect
+                    value={printerPaper}
+                    onChange={(val) => {
+                      setPrinterPaper(val);
+                      localStorage.setItem('pos_saved_paper_size', val);
+                    }}
+                    options={[
+                      {
+                        value: 'Thermal80',
+                        label: 'Thermal Receipt (80mm / 3 inch) — Standard POS (Recommended)',
+                        icon: <Receipt className="w-4 h-4 text-primary-600 flex-shrink-0" />,
+                      },
+                      {
+                        value: 'Thermal58',
+                        label: 'Thermal Receipt (58mm / 2 inch) — Mini Bluetooth / USB POS',
+                        icon: <Receipt className="w-4 h-4 text-primary-500 flex-shrink-0" />,
+                      },
+                      {
+                        value: 'Thermal72',
+                        label: 'Thermal Receipt (72mm / 2.83 inch) — Mid-size POS Roll',
+                        icon: <Receipt className="w-4 h-4 text-primary-500 flex-shrink-0" />,
+                      },
+                      {
+                        value: 'Thermal100',
+                        label: 'Thermal Receipt (100mm / 4 inch) — Wide Slip / Delivery Bill',
+                        icon: <Receipt className="w-4 h-4 text-primary-600 flex-shrink-0" />,
+                      },
+                      {
+                        value: 'A4',
+                        label: 'Standard A4 Sheet (210 × 297 mm) — Full Page Tax Invoice',
+                        icon: <FileText className="w-4 h-4 text-emerald-600 flex-shrink-0" />,
+                      },
+                      {
+                        value: 'A5',
+                        label: 'Standard A5 Sheet (148 × 210 mm) — Half Page Bill Book',
+                        icon: <FileText className="w-4 h-4 text-emerald-500 flex-shrink-0" />,
+                      },
+                      {
+                        value: 'B5',
+                        label: 'Standard B5 Sheet (176 × 250 mm) — Compact Billing Sheet',
+                        icon: <FileText className="w-4 h-4 text-emerald-500 flex-shrink-0" />,
+                      },
+                      {
+                        value: 'Letter',
+                        label: 'US Letter Sheet (8.5 × 11 inch) — Standard Sheet',
+                        icon: <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />,
+                      },
+                      {
+                        value: 'Continuous3Inch',
+                        label: 'Continuous 3-Inch Roll (76mm) — Dot Matrix / Impact Roll',
+                        icon: <Layers className="w-4 h-4 text-purple-600 flex-shrink-0" />,
+                      },
+                    ]}
+                    className="w-full block"
+                    buttonClassName="w-full h-11 text-xs font-semibold rounded-xl justify-between shadow-2xs"
+                    dropdownClassName="w-full max-w-none shadow-xl max-h-72"
+                  />
+                  <p className="min-h-[2.5rem] flex items-start text-3xs text-surface-500 leading-relaxed">
+                    Supports all thermal roll sizes (58mm, 72mm, 80mm, 100mm) and standard cut sheets (A4, A5, B5, Letter).
+                  </p>
+                </div>
+
+                {/* 3. Copies per Print */}
+                <div className="flex flex-col space-y-2">
+                  <div className="h-6 flex items-center justify-between">
+                    <label className="text-xs font-bold text-surface-800">
+                      Copies per Print
+                    </label>
+                    <span className="badge badge-neutral text-3xs font-bold">
+                      {printerCopies} {Number(printerCopies) > 1 ? 'Copies' : 'Copy'}
+                    </span>
+                  </div>
+                  <CustomSelect
+                    value={printerCopies}
+                    onChange={(val) => {
+                      setPrinterCopies(val);
+                      localStorage.setItem('pos_saved_printer_copies', val);
+                    }}
+                    options={[
+                      { value: '1', label: '1 Copy (Customer Receipt)' },
+                      { value: '2', label: '2 Copies (Customer + Shop Record)' },
+                      { value: '3', label: '3 Copies (Customer + Store + Accounts)' },
+                      { value: '4', label: '4 Copies' },
+                      { value: '5', label: '5 Copies' },
+                    ]}
+                    className="w-full block"
+                    buttonClassName="w-full h-11 text-xs font-semibold rounded-xl justify-between shadow-2xs"
+                    dropdownClassName="w-full max-w-none shadow-xl"
+                  />
+                  <p className="min-h-[2.5rem] flex items-start text-3xs text-surface-500 leading-relaxed">
+                    Automatically print duplicate copies on billing completion without asking each time.
+                  </p>
                 </div>
               </div>
-            </div>
 
-            {/* How to use guide */}
-            <div className="p-3.5 rounded-lg bg-blue-50/70 border border-blue-200 text-xs space-y-1.5">
-              <div className="font-bold text-blue-900 flex items-center gap-1">
-                <HelpCircle className="w-3.5 h-3.5 text-blue-700" />
-                <span>Google Drive Cloud Configuration Guide:</span>
+              {/* Permanent Preference Lock Notice */}
+              <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200/80 flex items-start gap-3">
+                <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+                <div className="text-xs text-blue-900 leading-relaxed flex-1">
+                  <span className="font-bold">Permanent Device Persistence:</span>{' '}
+                  Your selected printer device (<span className="font-mono font-bold">{selectedPrinter || systemDefaultPrinter || 'System Default'}</span>) and paper format (<span className="font-mono font-bold">{printerPaper}</span>) are saved directly in your workstation database and browser storage. They will <strong>never erase, reset, or disappear</strong> when navigating pages or restarting the system.
+                </div>
               </div>
-              <p className="text-2xs text-blue-800 leading-relaxed">
-                1. Go to <b>drive.google.com</b> and create a new folder (e.g. <i>Billing_Backups</i>).<br/>
-                2. Right-click the folder and copy its shareable link.<br/>
-                3. Paste the link into the box above and click <b>Save Settings</b>.<br/>
-                4. Go to <b>Backup & Import</b> to trigger instant cloud uploads anytime!
-              </p>
-            </div>
 
-            <div className="pt-2 border-t border-surface-100 flex justify-end">
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="btn-primary text-xs flex items-center gap-1.5"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>{isSaving ? 'Saving...' : 'Save Google Drive Config'}</span>
-              </button>
+              {/* Bottom Actions: Test Print & Save */}
+              <div className="pt-4 border-t border-surface-200/80 flex items-center justify-between gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleTestPrint}
+                  disabled={isTestingPrinter}
+                  className="btn-secondary h-11 px-4 text-xs font-bold flex items-center gap-2 rounded-xl"
+                  title="Send a sample diagnostic receipt to the selected printer"
+                >
+                  {isTestingPrinter ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-primary-600" />
+                  ) : (
+                    <Play className="w-4 h-4 text-primary-600" />
+                  )}
+                  <span>{isTestingPrinter ? 'Printing Test...' : 'Print Test Receipt'}</span>
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="btn-primary h-11 px-6 text-xs font-bold flex items-center gap-2 rounded-xl shadow-md"
+                >
+                  {isSaving ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  <span>{isSaving ? 'Saving...' : 'Save Printer Preferences'}</span>
+                </button>
+              </div>
             </div>
           </form>
         )}
 
-        {/* Tab 5: Multi-Computer Network & Devices */}
+        {/* Tab 4: Multi-Computer Network & Devices */}
         {activeTab === 'network' && (
           <div className="space-y-5">
             {/* Host Server Details Card */}
@@ -897,9 +1243,15 @@ export const SettingsPage: React.FC = () => {
           </div>
         )}
 
+        {/* Tab 5: Local Backup & Restore */}
+        {activeTab === 'backup' && (
+          <BackupPage />
+        )}
+
         {/* Tab 6: Offline Activation Status */}
         {activeTab === 'license' && (
-          <div className="card p-5 space-y-4 bg-white">
+          <div className="space-y-5">
+            <div className="card p-5 space-y-4 bg-white">
             <h3 className="text-sm font-bold text-surface-900 border-b border-surface-100 pb-2 flex items-center gap-2">
               <Shield className="w-4 h-4 text-primary-600" />
               <span>Security Key & Device License</span>
@@ -954,6 +1306,95 @@ export const SettingsPage: React.FC = () => {
                 Deactivate This Device
               </button>
             </div>
+          </div>
+
+          {/* USB Pen Drive Single-Use Security Key Generator */}
+          <div className="card p-5 space-y-4 bg-white border border-surface-200 shadow-sm rounded-2xl">
+            <div className="border-b border-surface-100 pb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary-50 text-primary-700 flex items-center justify-center">
+                  <Usb className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-surface-900">
+                    Burn / Provision Single-Use USB Security Pen Drive
+                  </h4>
+                  <p className="text-2xs text-surface-500 mt-0.5">
+                    Write a cryptographically signed hardware activation key onto an inserted USB pen drive.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={loadDrives}
+                disabled={isLoadingDrives}
+                className="btn-secondary h-8 px-2.5 text-2xs flex items-center gap-1 font-semibold"
+                title="Scan for connected pen drives"
+              >
+                <RefreshCw className={`w-3 h-3 ${isLoadingDrives ? 'animate-spin text-primary-600' : ''}`} />
+                <span>Scan Drives</span>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-3.5 rounded-xl bg-surface-50 border border-surface-200 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-surface-800">
+                    Target USB Pen Drive:
+                  </label>
+                  <span className="text-3xs text-surface-500 font-mono">
+                    {drives.length} drives detected
+                  </span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  <select
+                    value={selectedDriveForBurn}
+                    onChange={(e) => setSelectedDriveForBurn(e.target.value)}
+                    className="form-select flex-1 text-xs font-medium bg-white h-10 rounded-xl"
+                  >
+                    {drives.length === 0 ? (
+                      <option value="">No USB Pen Drives Detected — Insert a pen drive and click Scan</option>
+                    ) : (
+                      drives.map((d) => (
+                        <option key={d.letter} value={d.letter}>
+                          {d.letter} ({d.label || 'Removable Storage'}) — {d.is_removable ? 'USB Pen Drive' : 'Drive'}
+                        </option>
+                      ))
+                    )}
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={handleBurnUsbKey}
+                    disabled={isBurningKey || !selectedDriveForBurn || drives.length === 0}
+                    className="btn-primary h-10 px-5 text-xs font-bold flex items-center justify-center gap-2 shadow-xs whitespace-nowrap rounded-xl"
+                  >
+                    {isBurningKey ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    ) : (
+                      <KeyRound className="w-4 h-4" />
+                    )}
+                    <span>{isBurningKey ? 'Writing Security Key...' : 'Burn Security Key to Pen Drive'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Single-Use Consumption Guarantee Note */}
+              <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200/80 text-xs text-blue-900 flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-blue-700 flex-shrink-0 mt-0.5" />
+                <div className="leading-relaxed text-2xs space-y-1">
+                  <div className="font-bold text-xs text-blue-950">One-Time Activation Security Guarantee:</div>
+                  <div>
+                    When this pen drive is plugged into a new workstation computer during software setup and activated, the software will <strong>immediately consume and permanently erase the key file from the pen drive</strong>.
+                  </div>
+                  <div className="text-blue-800">
+                    This strictly guarantees the key cannot be reused or cloned to other computers. To install on another machine later, you must burn a fresh key.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
           </div>
         )}
 

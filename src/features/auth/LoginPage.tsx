@@ -178,6 +178,12 @@ export const LoginPage: React.FC = () => {
         </div>
       </div>
 
+      {/* AESCION Company Copyright */}
+      <div className="mt-4 text-center select-none text-2xs text-surface-500 font-medium">
+        <p>© <strong className="font-bold text-surface-700">AESCION</strong> Billing Software. All rights reserved.</p>
+        <p className="text-3xs text-surface-400 mt-0.5">Enterprise Point of Sale & Billing Management System</p>
+      </div>
+
       {/* Setup Mode Modal */}
       <SetupModeModal
         isOpen={isSetupModalOpen}

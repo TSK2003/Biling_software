@@ -57,20 +57,25 @@ pub fn login(state: State<'_, AppState>, username: String, password: String) -> 
         let mut current = CURRENT_USER.lock().map_err(|_| "Session error".to_string())?;
         *current = Some(login_resp.user.clone());
 
+        // Persist active user session in local SQLite settings
+        let _ = db.conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('active_user_id', ?1)",
+            rusqlite::params![login_resp.user.id.to_string()],
+        );
+
         return Ok(login_resp);
     }
 
     // Host mode: Find user in local SQLite database
     let mut stmt = db.conn.prepare(
-        "SELECT id, username, display_name, password_hash, role, is_active, max_discount_pct, plain_password, permissions_json, created_at, updated_at
+        "SELECT id, username, display_name, password_hash, role, is_active, max_discount_pct, permissions_json, created_at, updated_at
          FROM users WHERE username = ?1 COLLATE NOCASE"
     ).map_err(|e| format!("Query error: {}", e))?;
     
     let user_result = stmt.query_row(rusqlite::params![username], |row| {
         let password_hash: String = row.get(3)?;
         let role: String = row.get(4)?;
-        let plain_password: Option<String> = row.get(7).ok();
-        let permissions_json: Option<String> = row.get(8).ok();
+        let permissions_json: Option<String> = row.get(7).ok();
         let permissions = parse_user_permissions(&role, permissions_json);
         
         Ok((
@@ -81,10 +86,9 @@ pub fn login(state: State<'_, AppState>, username: String, password: String) -> 
                 role,
                 is_active: row.get::<_, i32>(5)? == 1,
                 max_discount_pct: row.get(6)?,
-                plain_password,
                 permissions,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             },
             password_hash,
         ))
@@ -97,36 +101,26 @@ pub fn login(state: State<'_, AppState>, username: String, password: String) -> 
         return Err("Account is deactivated. Contact admin.".to_string());
     }
     
-    // Verify password with argon2 OR plain_password fallback
+    // Verify password with argon2 — no cleartext fallback, no hardcoded passwords
     use argon2::{Argon2, PasswordHash, PasswordVerifier};
-    let mut verified = false;
-
-    if let Ok(parsed_hash) = PasswordHash::new(&password_hash) {
-        if Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok() {
-            verified = true;
-        }
-    }
-
-    if !verified {
-        if let Some(ref plain) = user.plain_password {
-            if !plain.is_empty() && plain == &password {
-                verified = true;
-            }
-        }
-    }
-
-    if !verified && (password == "admin123" && user.username.to_lowercase() == "admin") {
-        verified = true;
-    }
-
-    if !verified {
-        return Err("Invalid username or password".to_string());
-    }
+    
+    let parsed_hash = PasswordHash::new(&password_hash)
+        .map_err(|_| "Invalid username or password".to_string())?;
+    
+    Argon2::default()
+        .verify_password(password.as_bytes(), &parsed_hash)
+        .map_err(|_| "Invalid username or password".to_string())?;
     
     // Set current user session
     let mut current = CURRENT_USER.lock().map_err(|_| "Session error".to_string())?;
     *current = Some(user.clone());
     
+    // Persist active user session in SQLite settings across restarts & refreshes
+    let _ = db.conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('active_user_id', ?1)",
+        rusqlite::params![user.id.to_string()],
+    );
+
     // Create session token (simple UUID for local app)
     let token = uuid::Uuid::new_v4().to_string();
     
@@ -154,13 +148,60 @@ pub fn logout(state: State<'_, AppState>) -> Result<(), String> {
         );
     }
     *current = None;
+
+    // Clear persistent active user session from SQLite
+    let _ = db.conn.execute("DELETE FROM settings WHERE key = 'active_user_id'", []);
+
     Ok(())
 }
 
 #[tauri::command]
-pub fn get_current_user() -> Result<Option<User>, String> {
-    let current = CURRENT_USER.lock().map_err(|_| "Session error".to_string())?;
-    Ok(current.clone())
+pub fn get_current_user(state: State<'_, AppState>) -> Result<Option<User>, String> {
+    let mut current = CURRENT_USER.lock().map_err(|_| "Session error".to_string())?;
+    if let Some(user) = current.as_ref() {
+        return Ok(Some(user.clone()));
+    }
+
+    // Attempt to rehydrate from persistent SQLite active_user_id
+    if let Ok(db) = state.db.lock() {
+        if let Ok(uid_str) = db.conn.query_row::<String, _, _>(
+            "SELECT value FROM settings WHERE key = 'active_user_id'",
+            [],
+            |r| r.get(0),
+        ) {
+            if let Ok(uid) = uid_str.trim().parse::<i64>() {
+                let mut stmt = match db.conn.prepare(
+                    "SELECT id, username, display_name, role, is_active, max_discount_pct, permissions_json, created_at, updated_at
+                     FROM users WHERE id = ?1 AND is_active = 1"
+                ) {
+                    Ok(s) => s,
+                    Err(_) => return Ok(None),
+                };
+
+                if let Ok(user) = stmt.query_row(rusqlite::params![uid], |row| {
+                    let role: String = row.get(3)?;
+                    let permissions_json: Option<String> = row.get(6).ok();
+                    let permissions = parse_user_permissions(&role, permissions_json);
+                    Ok(User {
+                        id: row.get(0)?,
+                        username: row.get(1)?,
+                        display_name: row.get(2)?,
+                        role,
+                        is_active: row.get::<_, i32>(4)? == 1,
+                        max_discount_pct: row.get(5)?,
+                        permissions,
+                        created_at: row.get(7)?,
+                        updated_at: row.get(8)?,
+                    })
+                }) {
+                    *current = Some(user.clone());
+                    return Ok(Some(user));
+                }
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 #[tauri::command]
@@ -200,10 +241,10 @@ pub fn change_password(
         .map_err(|e| format!("Password hashing failed: {}", e))?
         .to_string();
     
-    // Update both password_hash and plain_password
+    // Update password hash only — never store cleartext passwords
     db.conn.execute(
-        "UPDATE users SET password_hash = ?1, plain_password = ?2, updated_at = datetime('now') WHERE id = ?3",
-        rusqlite::params![new_hash, new_password, user_id],
+        "UPDATE users SET password_hash = ?1, plain_password = NULL, updated_at = datetime('now') WHERE id = ?2",
+        rusqlite::params![new_hash, user_id],
     ).map_err(|e| format!("Update failed: {}", e))?;
     
     // Audit log
@@ -213,4 +254,32 @@ pub fn change_password(
     );
     
     Ok(())
+}
+
+/// Get the currently authenticated user from the backend session.
+/// This is the AUTHORITATIVE identity — never trust frontend-supplied user IDs for authorization.
+pub fn get_authenticated_user() -> Result<User, String> {
+    let current = CURRENT_USER.lock().map_err(|_| "Session error".to_string())?;
+    current.clone().ok_or_else(|| "Authentication required. Please log in.".to_string())
+}
+
+/// Require that the current user has access to a specific screen/module.
+pub fn require_screen_access(screen: &str) -> Result<User, String> {
+    let user = get_authenticated_user()?;
+    if user.role == "admin" {
+        return Ok(user);
+    }
+    if user.permissions.contains(&screen.to_string()) {
+        return Ok(user);
+    }
+    Err(format!("Access denied. You do not have permission to access '{}'.", screen))
+}
+
+/// Require that the current user is an administrator.
+pub fn require_admin() -> Result<User, String> {
+    let user = get_authenticated_user()?;
+    if user.role == "admin" {
+        return Ok(user);
+    }
+    Err("Access denied. Administrator privileges required.".to_string())
 }

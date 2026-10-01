@@ -5,3 +5,4 @@ pub mod report_service;
 pub mod import_service;
 pub mod backup_service;
 pub mod gdrive_service;
+pub mod printer_service;

@@ -55,12 +55,17 @@ impl Database {
         ).unwrap_or(false);
 
         if !admin_exists {
-            let all_screens = r#"["billing","bills","dashboard","products","categories","reports","backup","users","settings"]"#;
-            let _ = db.conn.execute(
-                "INSERT INTO users (username, display_name, password_hash, plain_password, permissions_json, role, is_active, max_discount_pct)
-                 VALUES ('admin', 'Administrator', 'admin123', 'admin123', ?1, 'admin', 1, 100)",
-                rusqlite::params![all_screens],
-            );
+            let all_screens = r#"["billing","bills","dashboard","products","categories","reports","backup","users","settings","expenses"]"#;
+            use argon2::{Argon2, password_hash::{rand_core::OsRng, PasswordHasher, SaltString}};
+            let salt = SaltString::generate(&mut OsRng);
+            if let Ok(hash) = Argon2::default().hash_password(b"admin123", &salt) {
+                let _ = db.conn.execute(
+                    "INSERT INTO users (username, display_name, password_hash, permissions_json, role, is_active, max_discount_pct)
+                     VALUES ('admin', 'Administrator', ?1, ?2, 'admin', 1, 100)",
+                    rusqlite::params![hash.to_string(), all_screens],
+                );
+                log::info!("Recovery admin account created. Please change the default password immediately.");
+            }
         }
 
         // If built with demo-data feature or DEMO_DATA=1, auto-seed all 116 demo products
@@ -81,6 +86,9 @@ impl Database {
                 log::info!("Pre-seeded 116 demo products into database (DEMO_DATA build)");
             }
         }
+
+        // Automatically clean and align categories (removes ghost/empty legacy categories)
+        super::demo_data::clean_and_align_categories(&db.conn);
 
         Ok(db)
     }

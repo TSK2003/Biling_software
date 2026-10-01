@@ -1,14 +1,25 @@
+let globalCurrencySymbol = '₹';
+
+export function setGlobalCurrencySymbol(symbol: string) {
+  if (symbol && symbol.trim()) {
+    globalCurrencySymbol = symbol.trim();
+  }
+}
+
+export function getGlobalCurrencySymbol(): string {
+  return globalCurrencySymbol;
+}
+
 /**
- * Formats an amount in paise to Indian Rupee currency format (e.g. 15000 paise -> "₹150.00")
+ * Formats an amount in paise to currency format using configured currency symbol (e.g. 15000 paise -> "₹150.00" or "$150.00")
  */
-export function formatCurrency(paise: number): string {
-  const rupees = paise / 100;
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
+export function formatCurrency(paise: number, customSymbol?: string): string {
+  const sym = customSymbol !== undefined ? customSymbol : globalCurrencySymbol;
+  const val = (paise / 100).toLocaleString('en-IN', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(rupees);
+  });
+  return `${sym}${val}`;
 }
 
 /**
@@ -27,20 +38,23 @@ export function rupeesToPaise(rupees: number | string): number {
 }
 
 /**
- * Formats date string (YYYY-MM-DD) to readable format (e.g. "20 Aug 2026")
+ * Formats date string (YYYY-MM-DD) to Indian DD-MM-YYYY format (e.g. "2026-09-28" -> "28-09-2026")
+ */
+export function formatDateDMY(dateStr: string, separator: string = '-'): string {
+  if (!dateStr) return '';
+  const clean = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr.trim();
+  const parts = clean.split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    return `${parts[2]}${separator}${parts[1]}${separator}${parts[0]}`;
+  }
+  return dateStr;
+}
+
+/**
+ * Formats date string (YYYY-MM-DD) to readable format (e.g. "28-09-2026")
  */
 export function formatDate(dateStr: string): string {
-  if (!dateStr) return '';
-  try {
-    const parts = dateStr.split('-');
-    if (parts.length === 3) {
-      const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-      return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-    }
-    return dateStr;
-  } catch {
-    return dateStr;
-  }
+  return formatDateDMY(dateStr);
 }
 
 /**

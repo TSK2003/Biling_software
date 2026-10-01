@@ -38,6 +38,7 @@ pub fn update_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
+    crate::commands::auth::require_admin()?;
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
     
     let affected = db.conn.execute(

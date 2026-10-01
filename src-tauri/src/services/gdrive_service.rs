@@ -39,7 +39,7 @@ impl GDriveService {
                             "SELECT value FROM settings WHERE key = 'gdrive_auto_sync'",
                             [],
                             |r| r.get(0),
-                        ).unwrap_or_else(|_| "false".to_string());
+                        ).unwrap_or_else(|_| "true".to_string());
                         (folder, auto == "true")
                     };
 

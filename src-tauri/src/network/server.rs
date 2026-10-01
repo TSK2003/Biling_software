@@ -16,6 +16,7 @@ use crate::db::connection::Database;
 use crate::models::{
     BillingProduct, CartItem, Category, CompleteBillResponse, Product, User,
     RegisterDeviceRequest, RegisterDeviceResponse, LoginRequest, LoginResponse,
+    BillDetail, Bill, BillItem, Payment, DashboardStats, SalesTrendItem,
 };
 
 #[derive(Clone)]
@@ -28,6 +29,47 @@ pub struct ServerState {
 pub struct SearchQuery {
     pub q: Option<String>,
     pub category_id: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct CategoryListQuery {
+    pub active_only: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct ProductListQuery {
+    pub category_id: Option<i64>,
+    pub active_only: Option<bool>,
+    pub page: Option<i32>,
+    pub page_size: Option<i32>,
+}
+
+#[derive(Deserialize)]
+pub struct BillsListQuery {
+    pub business_date: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub status: Option<String>,
+    pub search: Option<String>,
+    pub category_id: Option<i64>,
+    pub page: Option<i32>,
+    pub page_size: Option<i32>,
+}
+
+#[derive(Deserialize)]
+pub struct DashboardStatsQuery {
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct RecentBillsQuery {
+    pub limit: Option<i32>,
+}
+
+#[derive(Deserialize)]
+pub struct SalesTrendQuery {
+    pub days: Option<i32>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -51,6 +93,9 @@ pub struct CreateProductPayload {
     pub gst_enabled: Option<bool>,
     pub gst_percentage_x100: Option<i32>,
     pub image_path: Option<String>,
+    pub is_restockable: Option<bool>,
+    pub buying_price_paise: Option<i64>,
+    pub initial_stock: Option<i32>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -62,6 +107,8 @@ pub struct UpdateProductPayload {
     pub gst_percentage_x100: Option<i32>,
     pub is_active: Option<bool>,
     pub image_path: Option<String>,
+    pub is_restockable: Option<bool>,
+    pub buying_price_paise: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +142,7 @@ pub fn create_router(state: ServerState) -> Router {
         .route("/api/login", post(login_user))
         // Catalog & Products
         .route("/api/categories", get(get_categories).post(create_category_endpoint))
+        .route("/api/categories/reorder", post(reorder_categories_endpoint))
         .route("/api/categories/:id", put(update_category_endpoint).delete(delete_category_endpoint))
         .route("/api/products", get(get_products).post(create_product_endpoint))
         .route("/api/products/:id", put(update_product_endpoint).delete(delete_product_endpoint))
@@ -102,8 +150,13 @@ pub fn create_router(state: ServerState) -> Router {
         // Billing & Checkout
         .route("/api/billing/create", post(create_bill))
         .route("/api/bills", get(get_bills_history))
+        .route("/api/bills/:id", get(get_bill_detail_endpoint))
         .route("/api/bills/:id/void", post(void_bill))
         .route("/api/bills/:id/return", post(return_bill_endpoint))
+        // Dashboard & Analytics
+        .route("/api/dashboard/stats", get(get_dashboard_stats_endpoint))
+        .route("/api/dashboard/recent", get(get_recent_bills_endpoint))
+        .route("/api/dashboard/trend", get(get_sales_trend_endpoint))
         // Realtime WebSocket
         .route("/api/ws", get(ws_handler))
         .layer(cors)
@@ -225,13 +278,12 @@ async fn login_user(
     let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
 
     let row = db.conn.query_row(
-        "SELECT id, username, display_name, password_hash, role, is_active, max_discount_pct, plain_password, permissions_json, created_at, updated_at
+        "SELECT id, username, display_name, password_hash, role, is_active, max_discount_pct, permissions_json, created_at, updated_at
          FROM users WHERE username = ?1 COLLATE NOCASE",
         rusqlite::params![payload.username.trim()],
         |row| {
             let role: String = row.get(4)?;
-            let plain_password: Option<String> = row.get(7).ok();
-            let permissions_json: Option<String> = row.get(8).ok();
+            let permissions_json: Option<String> = row.get(7).ok();
             let permissions = crate::commands::users::parse_user_permissions(&role, permissions_json);
             Ok((
                 row.get::<_, i64>(0)?,
@@ -241,45 +293,28 @@ async fn login_user(
                 role,
                 row.get::<_, i32>(5)? == 1,
                 row.get::<_, i32>(6)?,
-                plain_password,
                 permissions,
+                row.get::<_, String>(8)?,
                 row.get::<_, String>(9)?,
-                row.get::<_, String>(10)?,
             ))
         },
     ).map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid username or password".to_string()))?;
 
-    let (id, username, display_name, password_hash, role, is_active, max_discount_pct, plain_password, permissions, created_at, updated_at) = row;
+    let (id, username, display_name, password_hash, role, is_active, max_discount_pct, permissions, created_at, updated_at) = row;
 
     if !is_active {
         return Err((StatusCode::FORBIDDEN, "User account is deactivated".to_string()));
     }
 
-    // Verify password with argon2 OR plain_password fallback
+    // Verify password with argon2 only — no cleartext fallback, no hardcoded passwords
     use argon2::{Argon2, PasswordHash, PasswordVerifier};
-    let mut verified = false;
-
-    if let Ok(parsed_hash) = PasswordHash::new(&password_hash) {
-        if Argon2::default().verify_password(payload.password.as_bytes(), &parsed_hash).is_ok() {
-            verified = true;
-        }
-    }
-
-    if !verified {
-        if let Some(ref plain) = plain_password {
-            if !plain.is_empty() && plain == &payload.password {
-                verified = true;
-            }
-        }
-    }
-
-    if !verified && (payload.password == "admin123" && username.to_lowercase() == "admin") {
-        verified = true;
-    }
-
-    if !verified {
-        return Err((StatusCode::UNAUTHORIZED, "Invalid username or password".to_string()));
-    }
+    
+    let parsed_hash = PasswordHash::new(&password_hash)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid username or password".to_string()))?;
+    
+    Argon2::default()
+        .verify_password(payload.password.as_bytes(), &parsed_hash)
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid username or password".to_string()))?;
 
     let user = User {
         id,
@@ -288,7 +323,6 @@ async fn login_user(
         role,
         is_active,
         max_discount_pct,
-        plain_password,
         permissions,
         created_at,
         updated_at,
@@ -302,12 +336,20 @@ async fn login_user(
     }))
 }
 
-async fn get_categories(State(state): State<ServerState>) -> Result<Json<Vec<Category>>, StatusCode> {
+async fn get_categories(
+    State(state): State<ServerState>,
+    Query(query): Query<CategoryListQuery>,
+) -> Result<Json<Vec<Category>>, StatusCode> {
     let db = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut stmt = db.conn.prepare(
+    let active_only = query.active_only.unwrap_or(false);
+    let sql = if active_only {
         "SELECT id, name, image_path, sort_order, is_active, created_at, updated_at
          FROM categories WHERE is_active = 1 ORDER BY sort_order ASC, name ASC"
-    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    } else {
+        "SELECT id, name, image_path, sort_order, is_active, created_at, updated_at
+         FROM categories ORDER BY sort_order ASC, name ASC"
+    };
+    let mut stmt = db.conn.prepare(sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let categories = stmt.query_map([], |row| {
         Ok(Category {
@@ -326,35 +368,69 @@ async fn get_categories(State(state): State<ServerState>) -> Result<Json<Vec<Cat
     Ok(Json(categories))
 }
 
-async fn get_products(State(state): State<ServerState>) -> Result<Json<Vec<Product>>, StatusCode> {
+async fn get_products(
+    State(state): State<ServerState>,
+    Query(query): Query<ProductListQuery>,
+) -> Result<Json<Vec<Product>>, StatusCode> {
     let db = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut stmt = db.conn.prepare(
+
+    let mut conditions = Vec::new();
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if query.active_only.unwrap_or(false) {
+        conditions.push("p.is_active = 1".to_string());
+        conditions.push("(c.is_active IS NULL OR c.is_active = 1)".to_string());
+    }
+
+    if let Some(cat_id) = query.category_id {
+        conditions.push(format!("p.category_id = ?{}", params_vec.len() + 1));
+        params_vec.push(Box::new(cat_id));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let sql = format!(
         "SELECT p.id, p.product_code, p.name, p.category_id, c.name, p.image_path,
                 p.selling_price_paise, p.gst_enabled, p.gst_percentage_x100, p.barcode,
-                p.is_active, p.created_at, p.updated_at
+                p.is_active, COALESCE(p.is_restockable, 0), COALESCE(p.buying_price_paise, 0),
+                COALESCE(i.current_stock, 0), p.created_at, p.updated_at
          FROM products p
          LEFT JOIN categories c ON p.category_id = c.id
-         WHERE p.is_active = 1
-         ORDER BY p.name ASC"
-    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+         LEFT JOIN inventory i ON p.id = i.product_id
+         {}
+         ORDER BY p.name ASC",
+        where_clause
+    );
 
-    let products = stmt.query_map([], |row| {
-        Ok(Product {
-            id: row.get(0)?,
-            product_code: row.get(1)?,
-            name: row.get(2)?,
-            category_id: row.get(3)?,
-            category_name: row.get(4)?,
-            image_path: row.get(5)?,
-            selling_price_paise: row.get(6)?,
-            gst_enabled: row.get::<_, i32>(7)? == 1,
-            gst_percentage_x100: row.get(8)?,
-            barcode: row.get(9)?,
-            is_active: row.get::<_, i32>(10)? == 1,
-            created_at: row.get(11)?,
-            updated_at: row.get(12)?,
-        })
-    }).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    let mut stmt = db.conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let products = stmt.query_map(
+        rusqlite::params_from_iter(params_vec.iter().map(|p| p.as_ref())),
+        |row| {
+            Ok(Product {
+                id: row.get(0)?,
+                product_code: row.get(1)?,
+                name: row.get(2)?,
+                category_id: row.get(3)?,
+                category_name: row.get(4)?,
+                image_path: row.get(5)?,
+                selling_price_paise: row.get(6)?,
+                gst_enabled: row.get::<_, i32>(7)? == 1,
+                gst_percentage_x100: row.get(8)?,
+                barcode: row.get(9)?,
+                is_active: row.get::<_, i32>(10)? == 1,
+                is_restockable: row.get::<_, i32>(11)? == 1,
+                buying_price_paise: row.get(12)?,
+                current_stock: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
+            })
+        },
+    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .filter_map(|r| r.ok())
     .collect();
 
@@ -453,6 +529,24 @@ async fn delete_category_endpoint(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn reorder_categories_endpoint(
+    State(state): State<ServerState>,
+    Json(ordered_ids): Json<Vec<i64>>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    let tx = db.conn.transaction().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Transaction failed: {}", e)))?;
+    for (i, &id) in ordered_ids.iter().enumerate() {
+        let order = (i + 1) as i32;
+        tx.execute(
+            "UPDATE categories SET sort_order = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![order, id],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update order: {}", e)))?;
+    }
+    tx.commit().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Commit failed: {}", e)))?;
+    Ok(StatusCode::OK)
+}
+
+
 async fn create_product_endpoint(
     State(state): State<ServerState>,
     Json(payload): Json<CreateProductPayload>,
@@ -465,18 +559,60 @@ async fn create_product_endpoint(
     if payload.selling_price_paise < 0 {
         return Err((StatusCode::BAD_REQUEST, "Price cannot be negative".to_string()));
     }
+
+    // Check for duplicate product name (case-insensitive)
+    let exists: bool = db.conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM products WHERE LOWER(TRIM(name)) = LOWER(?1))",
+        rusqlite::params![name],
+        |r| r.get(0),
+    ).unwrap_or(false);
+    if exists {
+        return Err((StatusCode::CONFLICT, "A product with this name already exists. Please choose a different name.".to_string()));
+    }
+
     let product_code = crate::commands::products::generate_product_code(&db.conn)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let gst_on = payload.gst_enabled.unwrap_or(false);
     let gst_pct = payload.gst_percentage_x100.unwrap_or(0);
+    let is_restock = payload.is_restockable.unwrap_or(false);
+    let buying_rate = payload.buying_price_paise.unwrap_or(0).max(0);
+    let count = payload.initial_stock.unwrap_or(0).max(0);
 
     db.conn.execute(
-        "INSERT INTO products (product_code, name, category_id, selling_price_paise, gst_enabled, gst_percentage_x100, image_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![product_code, name, payload.category_id, payload.selling_price_paise, gst_on as i32, gst_pct, payload.image_path],
+        "INSERT INTO products (product_code, name, category_id, selling_price_paise, gst_enabled, gst_percentage_x100, image_path, is_restockable, buying_price_paise)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![product_code, name, payload.category_id, payload.selling_price_paise, gst_on as i32, gst_pct, payload.image_path, is_restock as i32, buying_rate],
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create product: {}", e)))?;
 
     let id = db.conn.last_insert_rowid();
+
+    if is_restock {
+        let _ = db.conn.execute(
+            "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
+             ON CONFLICT(product_id) DO UPDATE SET current_stock = ?2, updated_at = datetime('now')",
+            rusqlite::params![id, count],
+        );
+
+        if count > 0 {
+            let _ = db.conn.execute(
+                "INSERT INTO stock_movements (product_id, quantity_change, movement_type, notes) VALUES (?1, ?2, 'opening', 'Initial stock purchase')",
+                rusqlite::params![id, count],
+            );
+            if buying_rate > 0 {
+                let _ = crate::commands::products::record_stock_purchase_expense(
+                    &db.conn,
+                    Some(id),
+                    &name,
+                    &product_code,
+                    count,
+                    buying_rate,
+                    None,
+                    None,
+                );
+            }
+        }
+    }
+
     let product = crate::commands::products::get_product_by_id(&db.conn, id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(product))
@@ -492,6 +628,15 @@ async fn update_product_endpoint(
         let n = n.trim();
         if n.is_empty() {
             return Err((StatusCode::BAD_REQUEST, "Product name cannot be empty".to_string()));
+        }
+        // Check for duplicate product name on another product
+        let exists: bool = db.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM products WHERE LOWER(TRIM(name)) = LOWER(?1) AND id != ?2)",
+            rusqlite::params![n, id],
+            |r| r.get(0),
+        ).unwrap_or(false);
+        if exists {
+            return Err((StatusCode::CONFLICT, "A product with this name already exists. Please choose a different name.".to_string()));
         }
         db.conn.execute("UPDATE products SET name = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![n, id])
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
@@ -525,6 +670,14 @@ async fn update_product_endpoint(
             rusqlite::params![if img.is_empty() { None } else { Some(img.as_str()) }, id],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
     }
+    if let Some(restock) = payload.is_restockable {
+        db.conn.execute("UPDATE products SET is_restockable = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![restock as i32, id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
+    if let Some(buying_price) = payload.buying_price_paise {
+        db.conn.execute("UPDATE products SET buying_price_paise = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![buying_price.max(0), id])
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Update failed: {}", e)))?;
+    }
 
     let product = crate::commands::products::get_product_by_id(&db.conn, id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -549,10 +702,14 @@ async fn get_billing_products(
     let db = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut sql = String::from(
         "SELECT p.id, p.product_code, p.name, p.category_id, COALESCE(c.name, 'General') as category_name,
-                p.image_path, p.selling_price_paise, p.gst_enabled, p.gst_percentage_x100
+                p.image_path, p.selling_price_paise, p.gst_enabled, p.gst_percentage_x100,
+                COALESCE(p.is_restockable, 0) as is_restockable,
+                COALESCE(p.buying_price_paise, 0) as buying_price_paise,
+                COALESCE(i.current_stock, 0) as current_stock
          FROM products p
          LEFT JOIN categories c ON p.category_id = c.id
-         WHERE p.is_active = 1"
+         LEFT JOIN inventory i ON p.id = i.product_id
+         WHERE p.is_active = 1 AND (c.is_active IS NULL OR c.is_active = 1)"
     );
 
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -584,6 +741,9 @@ async fn get_billing_products(
                 selling_price_paise: row.get(6)?,
                 gst_enabled: row.get::<_, i32>(7)? == 1,
                 gst_percentage_x100: row.get(8)?,
+                is_restockable: row.get::<_, i32>(9)? == 1,
+                buying_price_paise: row.get(10)?,
+                current_stock: row.get(11)?,
             })
         },
     ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -618,14 +778,51 @@ async fn create_bill(
         return Err((StatusCode::BAD_REQUEST, "Cart is empty".to_string()));
     }
 
+    // Validate stock for catalog items
+    for item in &payload.items {
+        if item.product_id > 0 {
+            let stock_info: Result<(i32, i32, String), _> = db.conn.query_row(
+                "SELECT COALESCE(p.is_restockable, 0), COALESCE(i.current_stock, 0), p.name
+                 FROM products p
+                 LEFT JOIN inventory i ON p.id = i.product_id
+                 WHERE p.id = ?1",
+                rusqlite::params![item.product_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            );
+
+            if let Ok((is_restockable, current_stock, product_name)) = stock_info {
+                if is_restockable == 1 {
+                    if current_stock <= 0 {
+                        return Err((StatusCode::BAD_REQUEST, format!(
+                            "Product \"{}\" is Out of Stock (0 units available).",
+                            product_name
+                        )));
+                    }
+                    if item.quantity as i32 > current_stock {
+                        return Err((StatusCode::BAD_REQUEST, format!(
+                            "Insufficient stock for \"{}\". Only {} units available in stock (requested {}).",
+                            product_name, current_stock, item.quantity
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
+    let shop_gst_enabled: bool = db.conn.query_row(
+        "SELECT value FROM settings WHERE key = 'gst_enabled'",
+        [],
+        |r| r.get::<_, String>(0),
+    ).map(|v| v.trim().eq_ignore_ascii_case("true")).unwrap_or(false);
+
     let mut subtotal_paise: i64 = 0;
     let mut gst_total_paise: i64 = 0;
 
     for item in &payload.items {
         let line_total = item.unit_price_paise * item.quantity as i64;
         subtotal_paise += line_total;
-        if item.gst_enabled && item.gst_percentage_x100 > 0 {
-            let gst = (line_total * item.gst_percentage_x100 as i64) / 10000;
+        if shop_gst_enabled && item.gst_enabled && item.gst_percentage_x100 > 0 {
+            let gst = ((line_total * item.gst_percentage_x100 as i64) + 5000) / 10000;
             gst_total_paise += gst;
         }
     }
@@ -681,11 +878,14 @@ async fn create_bill(
 
     for (idx, item) in payload.items.iter().enumerate() {
         let line_subtotal = item.unit_price_paise * item.quantity as i64;
-        let line_gst = if item.gst_enabled && item.gst_percentage_x100 > 0 {
-            (line_subtotal * item.gst_percentage_x100 as i64) / 10000
+        let item_gst_applied = shop_gst_enabled && item.gst_enabled && item.gst_percentage_x100 > 0;
+        let line_gst = if item_gst_applied {
+            ((line_subtotal * item.gst_percentage_x100 as i64) + 5000) / 10000
         } else {
             0
         };
+        let item_gst_flag = if item_gst_applied { 1 } else { 0 };
+        let item_gst_pct = if item_gst_applied { item.gst_percentage_x100 } else { 0 };
         let _line_total = line_subtotal + line_gst;
 
         let db_product_id: Option<i64> = if item.product_id > 0 { Some(item.product_id) } else { None };
@@ -699,7 +899,7 @@ async fn create_bill(
             rusqlite::params![
                 bill_id, db_product_id, item.product_code, item.product_name,
                 item.category_name, item.unit_price_paise, item.quantity,
-                item.gst_enabled as i32, item.gst_percentage_x100, line_gst,
+                item_gst_flag, item_gst_pct, line_gst,
                 line_subtotal, idx as i32,
             ],
         ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to insert bill item: {}", e)))?;
@@ -713,7 +913,7 @@ async fn create_bill(
             );
             let _ = tx.execute(
                 "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
-                 ON CONFLICT(product_id) DO UPDATE SET current_stock = current_stock - ?3, updated_at = datetime('now')",
+                 ON CONFLICT(product_id) DO UPDATE SET current_stock = MAX(0, current_stock - ?3), updated_at = datetime('now')",
                 rusqlite::params![pid, -(item.quantity as i32), item.quantity as i32],
             );
         }
@@ -724,6 +924,8 @@ async fn create_bill(
     let upi = payload.upi_amount_paise.unwrap_or(0);
     let change = if payload.payment_method == "cash" && cash > grand_total_paise {
         cash - grand_total_paise
+    } else if payload.payment_method == "upi_cash" && (upi + cash) > grand_total_paise {
+        (upi + cash) - grand_total_paise
     } else {
         0
     };
@@ -732,7 +934,7 @@ async fn create_bill(
         "cash" => (grand_total_paise, 0i64, 0i64),
         "card" => (0i64, grand_total_paise, 0i64),
         "upi" => (0i64, 0i64, grand_total_paise),
-        "upi_cash" => (cash, 0i64, upi),
+        "upi_cash" => (grand_total_paise.saturating_sub(upi), 0i64, upi),
         _ => (grand_total_paise, 0i64, 0i64),
     };
 
@@ -775,34 +977,361 @@ async fn create_bill(
     Ok(Json(resp))
 }
 
-async fn get_bills_history(State(state): State<ServerState>) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
+async fn get_bills_history(
+    State(state): State<ServerState>,
+    Query(query): Query<BillsListQuery>,
+) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
     let db = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut stmt = db.conn.prepare(
+
+    let mut conditions = Vec::new();
+    let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ref date) = query.business_date {
+        let d = date.trim();
+        if !d.is_empty() {
+            conditions.push(format!("(b.business_date = ?{0} OR substr(b.created_at, 1, 10) = ?{0})", params_vec.len() + 1));
+            params_vec.push(Box::new(d.to_string()));
+        }
+    }
+    if let Some(ref from) = query.date_from {
+        let f = from.trim();
+        if !f.is_empty() {
+            conditions.push(format!("(b.business_date >= ?{0} OR substr(b.created_at, 1, 10) >= ?{0})", params_vec.len() + 1));
+            params_vec.push(Box::new(f.to_string()));
+        }
+    }
+    if let Some(ref to) = query.date_to {
+        let t = to.trim();
+        if !t.is_empty() {
+            conditions.push(format!("(b.business_date <= ?{0} OR substr(b.created_at, 1, 10) <= ?{0})", params_vec.len() + 1));
+            params_vec.push(Box::new(t.to_string()));
+        }
+    }
+    if let Some(ref s) = query.status {
+        let s = s.trim();
+        if !s.is_empty() {
+            conditions.push(format!("b.status = ?{}", params_vec.len() + 1));
+            params_vec.push(Box::new(s.to_string()));
+        }
+    }
+    if let Some(cat_id) = query.category_id {
+        conditions.push(format!(
+            "EXISTS (SELECT 1 FROM bill_items bi LEFT JOIN products p ON bi.product_id = p.id WHERE bi.bill_id = b.id AND (p.category_id = ?{0} OR bi.category_name_snapshot = (SELECT name FROM categories WHERE id = ?{0})))",
+            params_vec.len() + 1
+        ));
+        params_vec.push(Box::new(cat_id));
+    }
+    if let Some(ref q) = query.search {
+        let q = q.trim();
+        if !q.is_empty() {
+            conditions.push(format!(
+                "(CAST(b.bill_number AS TEXT) LIKE ?{0} OR u.display_name LIKE ?{0} OR EXISTS (SELECT 1 FROM bill_items bi WHERE bi.bill_id = b.id AND (bi.product_name_snapshot LIKE ?{0} OR bi.category_name_snapshot LIKE ?{0})))",
+                params_vec.len() + 1
+            ));
+            params_vec.push(Box::new(format!("%{}%", q)));
+        }
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let limit = query.page_size.unwrap_or(100).min(500);
+
+    let sql = format!(
         "SELECT b.id, b.bill_uuid, b.bill_number, b.business_date, b.bill_time,
-                b.grand_total_paise, b.status, u.display_name, p.payment_method
+                b.grand_total_paise, b.subtotal_paise, b.discount_type, b.discount_value_x100,
+                b.discount_amount_paise, b.gst_total_paise, b.status, b.void_reason,
+                u.display_name, p.payment_method, b.created_at
          FROM bills b
          JOIN users u ON b.user_id = u.id
          LEFT JOIN payments p ON b.id = p.bill_id
-         ORDER BY b.id DESC LIMIT 100"
-    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+         {}
+         ORDER BY b.id DESC LIMIT {}",
+        where_clause, limit
+    );
 
-    let bills = stmt.query_map([], |row| {
-        Ok(json!({
-            "id": row.get::<_, i64>(0)?,
-            "bill_uuid": row.get::<_, String>(1)?,
-            "bill_number": row.get::<_, i32>(2)?,
-            "business_date": row.get::<_, String>(3)?,
-            "bill_time": row.get::<_, String>(4)?,
-            "grand_total_paise": row.get::<_, i64>(5)?,
-            "status": row.get::<_, String>(6)?,
-            "cashier_name": row.get::<_, String>(7)?,
-            "payment_method": row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "cash".to_string()),
-        }))
-    }).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    let mut stmt = db.conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let bills = stmt.query_map(
+        rusqlite::params_from_iter(params_vec.iter().map(|p| p.as_ref())),
+        |row| {
+            Ok(json!({
+                "id": row.get::<_, i64>(0)?,
+                "bill_uuid": row.get::<_, String>(1)?,
+                "bill_number": row.get::<_, i32>(2)?,
+                "business_date": row.get::<_, String>(3)?,
+                "bill_time": row.get::<_, String>(4)?,
+                "grand_total_paise": row.get::<_, i64>(5)?,
+                "subtotal_paise": row.get::<_, i64>(6)?,
+                "discount_type": row.get::<_, String>(7)?,
+                "discount_value_x100": row.get::<_, i32>(8)?,
+                "discount_amount_paise": row.get::<_, i64>(9)?,
+                "gst_total_paise": row.get::<_, i64>(10)?,
+                "status": row.get::<_, String>(11)?,
+                "void_reason": row.get::<_, Option<String>>(12)?,
+                "cashier_name": row.get::<_, String>(13)?,
+                "payment_method": row.get::<_, Option<String>>(14)?.unwrap_or_else(|| "cash".to_string()),
+                "created_at": row.get::<_, String>(15)?,
+            }))
+        },
+    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .filter_map(|r| r.ok())
     .collect();
 
     Ok(Json(bills))
+}
+
+async fn get_bill_detail_endpoint(
+    State(state): State<ServerState>,
+    Path(bill_id): Path<i64>,
+) -> Result<Json<BillDetail>, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+
+    let bill = db.conn.query_row(
+        "SELECT b.id, b.bill_uuid, b.bill_number, b.business_date, b.bill_time,
+                b.user_id, u.display_name, b.subtotal_paise, b.discount_type,
+                b.discount_value_x100, b.discount_amount_paise, b.gst_total_paise,
+                b.grand_total_paise, b.status, b.void_reason,
+                p.payment_method, b.created_at
+         FROM bills b
+         LEFT JOIN users u ON b.user_id = u.id
+         LEFT JOIN payments p ON b.id = p.bill_id
+         WHERE b.id = ?1",
+        rusqlite::params![bill_id],
+        |row| {
+            Ok(Bill {
+                id: row.get(0)?,
+                bill_uuid: row.get(1)?,
+                bill_number: row.get(2)?,
+                business_date: row.get(3)?,
+                bill_time: row.get(4)?,
+                user_id: row.get(5)?,
+                user_name: row.get(6)?,
+                subtotal_paise: row.get(7)?,
+                discount_type: row.get(8)?,
+                discount_value_x100: row.get(9)?,
+                discount_amount_paise: row.get(10)?,
+                gst_total_paise: row.get(11)?,
+                grand_total_paise: row.get(12)?,
+                status: row.get(13)?,
+                void_reason: row.get(14)?,
+                payment_method: row.get(15)?,
+                created_at: row.get(16)?,
+            })
+        },
+    ).map_err(|_| (StatusCode::NOT_FOUND, "Bill not found".to_string()))?;
+
+    let mut stmt = db.conn.prepare(
+        "SELECT id, bill_id, product_id, product_code_snapshot, product_name_snapshot,
+                category_name_snapshot, unit_price_paise, quantity, gst_enabled,
+                gst_percentage_x100, gst_amount_paise, line_total_paise
+         FROM bill_items
+         WHERE bill_id = ?1
+         ORDER BY sort_order ASC, id ASC"
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to prepare query: {}", e)))?;
+
+    let items: Vec<BillItem> = stmt.query_map(rusqlite::params![bill_id], |row| {
+        Ok(BillItem {
+            id: row.get(0)?,
+            bill_id: row.get(1)?,
+            product_id: row.get(2)?,
+            product_code_snapshot: row.get(3)?,
+            product_name_snapshot: row.get(4)?,
+            category_name_snapshot: row.get(5)?,
+            unit_price_paise: row.get(6)?,
+            quantity: row.get(7)?,
+            gst_enabled: row.get::<_, i32>(8)? == 1,
+            gst_percentage_x100: row.get(9)?,
+            gst_amount_paise: row.get(10)?,
+            line_total_paise: row.get(11)?,
+        })
+    }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Query error: {}", e)))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    let payment = db.conn.query_row(
+        "SELECT id, bill_id, payment_method, total_amount_paise,
+                cash_amount_paise, card_amount_paise, upi_amount_paise, created_at
+         FROM payments
+         WHERE bill_id = ?1",
+        rusqlite::params![bill_id],
+        |row| {
+            Ok(Payment {
+                id: row.get(0)?,
+                bill_id: row.get(1)?,
+                payment_method: row.get(2)?,
+                total_amount_paise: row.get(3)?,
+                cash_amount_paise: row.get(4)?,
+                card_amount_paise: row.get(5)?,
+                upi_amount_paise: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        },
+    ).unwrap_or(Payment {
+        id: 0,
+        bill_id,
+        payment_method: bill.payment_method.clone().unwrap_or_else(|| "cash".to_string()),
+        total_amount_paise: bill.grand_total_paise,
+        cash_amount_paise: if bill.payment_method.as_deref() == Some("cash") { bill.grand_total_paise } else { 0 },
+        card_amount_paise: if bill.payment_method.as_deref() == Some("card") { bill.grand_total_paise } else { 0 },
+        upi_amount_paise: if bill.payment_method.as_deref() == Some("upi") { bill.grand_total_paise } else { 0 },
+        created_at: bill.created_at.clone(),
+    });
+
+    Ok(Json(BillDetail { bill, items, payment }))
+}
+
+async fn get_dashboard_stats_endpoint(
+    State(state): State<ServerState>,
+    Query(query): Query<DashboardStatsQuery>,
+) -> Result<Json<DashboardStats>, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    let now = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let date_from = query.date_from.unwrap_or_else(|| now.clone());
+    let date_to = query.date_to.unwrap_or(now);
+
+    let stats = db.conn.query_row(
+        "SELECT
+            COALESCE(SUM(b.grand_total_paise), 0) as total_sales,
+            COUNT(b.id) as total_bills,
+            COALESCE(SUM(b.discount_amount_paise), 0) as total_discount,
+            COALESCE(SUM(b.gst_total_paise), 0) as total_gst,
+            COALESCE(SUM(p.cash_amount_paise), 0) as cash_sales,
+            COALESCE(SUM(p.upi_amount_paise), 0) as upi_sales,
+            COALESCE(SUM(p.card_amount_paise), 0) as card_sales
+         FROM bills b
+         LEFT JOIN payments p ON b.id = p.bill_id
+         WHERE b.status IN ('completed', 'returned')
+           AND (b.business_date >= ?1 AND b.business_date <= ?2
+                OR substr(b.created_at, 1, 10) >= ?1 AND substr(b.created_at, 1, 10) <= ?2)",
+        rusqlite::params![date_from, date_to],
+        |row| {
+            let total_sales: i64 = row.get(0)?;
+            let total_bills: i64 = row.get(1)?;
+            Ok(DashboardStats {
+                total_sales_paise: total_sales,
+                total_bills,
+                total_items_sold: 0,
+                cash_sales_paise: row.get(4)?,
+                upi_sales_paise: row.get(5)?,
+                card_sales_paise: row.get(6)?,
+                total_discount_paise: row.get(2)?,
+                total_gst_paise: row.get(3)?,
+                avg_bill_paise: if total_bills > 0 { total_sales / total_bills } else { 0 },
+                total_expenses_paise: None,
+                net_income_paise: None,
+            })
+        },
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Stats error: {}", e)))?;
+
+    let total_items: i64 = db.conn.query_row(
+        "SELECT COALESCE(SUM(bi.quantity), 0)
+         FROM bill_items bi
+         JOIN bills b ON bi.bill_id = b.id
+         WHERE b.status IN ('completed', 'returned')
+           AND (b.business_date >= ?1 AND b.business_date <= ?2
+                OR substr(b.created_at, 1, 10) >= ?1 AND substr(b.created_at, 1, 10) <= ?2)",
+        rusqlite::params![date_from, date_to],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    let total_expenses: i64 = db.conn.query_row(
+        "SELECT COALESCE(SUM(amount_paise), 0)
+         FROM expenses
+         WHERE status = 'active'
+           AND expense_date >= ?1 AND expense_date <= ?2",
+        rusqlite::params![date_from, date_to],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    let net_income = stats.total_sales_paise - total_expenses;
+
+    Ok(Json(DashboardStats {
+        total_items_sold: total_items,
+        total_expenses_paise: Some(total_expenses),
+        net_income_paise: Some(net_income),
+        ..stats
+    }))
+}
+
+async fn get_recent_bills_endpoint(
+    State(state): State<ServerState>,
+    Query(query): Query<RecentBillsQuery>,
+) -> Result<Json<Vec<Bill>>, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    let limit = query.limit.unwrap_or(10).min(100);
+
+    let mut stmt = db.conn.prepare(
+        "SELECT b.id, b.bill_uuid, b.bill_number, b.business_date, b.bill_time,
+                b.user_id, u.display_name, b.subtotal_paise, b.discount_type,
+                b.discount_value_x100, b.discount_amount_paise, b.gst_total_paise,
+                b.grand_total_paise, b.status, b.void_reason,
+                p.payment_method, b.created_at
+         FROM bills b
+         LEFT JOIN users u ON b.user_id = u.id
+         LEFT JOIN payments p ON b.id = p.bill_id
+         ORDER BY b.id DESC
+         LIMIT ?1"
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let bills: Vec<Bill> = stmt.query_map(rusqlite::params![limit], |row| {
+        Ok(Bill {
+            id: row.get(0)?,
+            bill_uuid: row.get(1)?,
+            bill_number: row.get(2)?,
+            business_date: row.get(3)?,
+            bill_time: row.get(4)?,
+            user_id: row.get(5)?,
+            user_name: row.get(6)?,
+            subtotal_paise: row.get(7)?,
+            discount_type: row.get(8)?,
+            discount_value_x100: row.get(9)?,
+            discount_amount_paise: row.get(10)?,
+            gst_total_paise: row.get(11)?,
+            grand_total_paise: row.get(12)?,
+            status: row.get(13)?,
+            void_reason: row.get(14)?,
+            payment_method: row.get(15)?,
+            created_at: row.get(16)?,
+        })
+    }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(Json(bills))
+}
+
+async fn get_sales_trend_endpoint(
+    State(state): State<ServerState>,
+    Query(query): Query<SalesTrendQuery>,
+) -> Result<Json<Vec<SalesTrendItem>>, (StatusCode, String)> {
+    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed".to_string()))?;
+    let days = query.days.unwrap_or(7);
+
+    let mut stmt = db.conn.prepare(
+        "SELECT b.business_date, COALESCE(SUM(b.grand_total_paise), 0), COUNT(b.id)
+         FROM bills b
+         WHERE b.status IN ('completed', 'returned')
+           AND b.business_date >= date('now', ?1)
+         GROUP BY b.business_date
+         ORDER BY b.business_date ASC"
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let modifier = format!("-{} days", days);
+    let trend: Vec<SalesTrendItem> = stmt.query_map(rusqlite::params![modifier], |row| {
+        Ok(SalesTrendItem {
+            date: row.get(0)?,
+            total_sales_paise: row.get(1)?,
+            bill_count: row.get(2)?,
+        })
+    }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(Json(trend))
 }
 
 async fn void_bill(
@@ -810,14 +1339,64 @@ async fn void_bill(
     Path(id): Path<i64>,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "DB Lock error".to_string()))?;
+    let mut db = state.db.lock().map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "DB Lock error".to_string()))?;
     let reason = payload["reason"].as_str().unwrap_or("Customer request");
     let user_id = payload["user_id"].as_i64().unwrap_or(1);
 
-    db.conn.execute(
-        "UPDATE bills SET status = 'voided', void_reason = ?1, voided_by_user_id = ?2, voided_at = datetime('now') WHERE id = ?3",
+    // Check if bill exists and can be voided
+    let status: String = db.conn.query_row(
+        "SELECT status FROM bills WHERE id = ?1",
+        rusqlite::params![id],
+        |r| r.get(0),
+    ).map_err(|_| (StatusCode::NOT_FOUND, "Bill not found".to_string()))?;
+
+    if status != "completed" && status != "returned" {
+        return Err((StatusCode::BAD_REQUEST, format!("Bill cannot be voided because it is already {}", status)));
+    }
+
+    let tx = db.conn.transaction().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Restore stock for all items
+    {
+        let mut items_stmt = tx.prepare(
+            "SELECT bi.product_id, bi.quantity FROM bill_items bi WHERE bi.bill_id = ?1 AND bi.product_id IS NOT NULL AND bi.quantity > 0"
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        
+        let items: Vec<(i64, i32)> = items_stmt.query_map(rusqlite::params![id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i32>(1)?))
+        }).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+        for (product_id, quantity) in &items {
+            tx.execute(
+                "UPDATE inventory SET current_stock = current_stock + ?1, updated_at = datetime('now') WHERE product_id = ?2",
+                rusqlite::params![quantity, product_id],
+            ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            
+            tx.execute(
+                "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes) VALUES (?1, ?2, 'void_reversal', ?3, ?4, ?5)",
+                rusqlite::params![product_id, *quantity as i32, id, user_id, format!("Stock restored: bill #{} voided via LAN. Reason: {}", id, reason.trim())],
+            ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        }
+    }
+
+    tx.execute(
+        "UPDATE bills SET status = 'voided', void_reason = ?1, voided_by_user_id = ?2, voided_at = datetime('now'), grand_total_paise = 0, subtotal_paise = 0, updated_at = datetime('now') WHERE id = ?3",
         rusqlite::params![reason, user_id, id],
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to void bill: {}", e)))?;
+
+    tx.execute(
+        "UPDATE payments SET total_amount_paise = 0, cash_amount_paise = 0, upi_amount_paise = 0, card_amount_paise = 0 WHERE bill_id = ?1",
+        rusqlite::params![id],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    tx.execute(
+        "INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json) VALUES (?1, 'void', 'bill', ?2, ?3)",
+        rusqlite::params![user_id, id, format!("{{\"reason\":\"{}\",\"source\":\"lan\"}}", reason.trim())],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    tx.commit().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let _ = state.tx.send(json!({ "event": "BILL_VOIDED", "bill_id": id }).to_string());
 
@@ -838,25 +1417,18 @@ async fn return_bill_endpoint(
 
     // 1. Return items back to inventory stock and record stock movements
     if let Some(items) = payload["items"].as_array() {
+        if items.is_empty() {
+            return Err((StatusCode::BAD_REQUEST, "No items specified for return".to_string()));
+        }
+
         for item in items {
             let pid = item["productId"].as_i64().or_else(|| item["product_id"].as_i64());
             let qty = item["quantity"].as_i64().unwrap_or(1) as i32;
             let bill_item_id = item["billItemId"].as_i64().or_else(|| item["bill_item_id"].as_i64()).unwrap_or(0);
             let unit_price = item["unitPricePaise"].as_i64().or_else(|| item["unit_price_paise"].as_i64()).unwrap_or(0);
 
-            if let Some(product_id) = pid {
-                if product_id > 0 {
-                    let _ = tx.execute(
-                        "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes)
-                         VALUES (?1, ?2, 'return', ?3, ?4, ?5)",
-                        rusqlite::params![product_id, qty, id, user_id, reason],
-                    );
-                    let _ = tx.execute(
-                        "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
-                         ON CONFLICT(product_id) DO UPDATE SET current_stock = current_stock + ?3, updated_at = datetime('now')",
-                        rusqlite::params![product_id, qty, qty],
-                    );
-                }
+            if qty <= 0 {
+                return Err((StatusCode::BAD_REQUEST, "Return quantity must be greater than zero".to_string()));
             }
 
             if bill_item_id > 0 {
@@ -866,26 +1438,50 @@ async fn return_bill_endpoint(
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
                 ).ok();
 
-                if let Some((current_qty, unit_price_db, gst_enabled, gst_percentage_x100)) = item_data {
-                    let price = if unit_price > 0 { unit_price } else { unit_price_db };
-                    let new_item_qty = (current_qty - qty as i64).max(0);
-                    if new_item_qty <= 0 {
-                        let _ = tx.execute(
-                            "DELETE FROM bill_items WHERE id = ?1",
-                            rusqlite::params![bill_item_id],
-                        );
-                    } else {
-                        let new_line_total = new_item_qty * price;
-                        let new_gst_amount = if gst_enabled == 1 && gst_percentage_x100 > 0 {
-                            (new_line_total * gst_percentage_x100 as i64) / 10000
-                        } else {
-                            0
-                        };
-                        let _ = tx.execute(
-                            "UPDATE bill_items SET quantity = ?1, line_total_paise = ?2, gst_amount_paise = ?3 WHERE id = ?4",
-                            rusqlite::params![new_item_qty, new_line_total, new_gst_amount, bill_item_id],
-                        );
+                let (current_qty, unit_price_db, gst_enabled, gst_percentage_x100) = item_data
+                    .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Bill item {} not found", bill_item_id)))?;
+
+                if (qty as i64) > current_qty {
+                    return Err((StatusCode::BAD_REQUEST, format!(
+                        "Return quantity ({}) cannot exceed billed quantity ({}) for item #{}",
+                        qty, current_qty, bill_item_id
+                    )));
+                }
+
+                if let Some(product_id) = pid {
+                    if product_id > 0 {
+                        tx.execute(
+                            "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes)
+                             VALUES (?1, ?2, 'return', ?3, ?4, ?5)",
+                            rusqlite::params![product_id, qty, id, user_id, reason.trim()],
+                        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to record stock movement: {}", e)))?;
+
+                        tx.execute(
+                            "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
+                             ON CONFLICT(product_id) DO UPDATE SET current_stock = current_stock + ?3, updated_at = datetime('now')",
+                            rusqlite::params![product_id, qty, qty],
+                        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update inventory: {}", e)))?;
                     }
+                }
+
+                let price = if unit_price > 0 { unit_price } else { unit_price_db };
+                let new_item_qty = current_qty - qty as i64;
+                if new_item_qty <= 0 {
+                    tx.execute(
+                        "DELETE FROM bill_items WHERE id = ?1",
+                        rusqlite::params![bill_item_id],
+                    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to delete returned item: {}", e)))?;
+                } else {
+                    let new_line_total = new_item_qty * price;
+                    let new_gst_amount = if gst_enabled == 1 && gst_percentage_x100 > 0 {
+                        ((new_line_total * gst_percentage_x100 as i64) + 5000) / 10000
+                    } else {
+                        0
+                    };
+                    tx.execute(
+                        "UPDATE bill_items SET quantity = ?1, line_total_paise = ?2, gst_amount_paise = ?3 WHERE id = ?4",
+                        rusqlite::params![new_item_qty, new_line_total, new_gst_amount, bill_item_id],
+                    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update bill item: {}", e)))?;
                 }
             }
         }

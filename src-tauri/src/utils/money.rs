@@ -20,9 +20,9 @@ pub fn calculate_line_total(unit_price_paise: i64, quantity: i32) -> i64 {
     unit_price_paise * (quantity as i64)
 }
 
-/// Calculates GST amount in paise
+/// Calculates GST amount in paise using banker's rounding (consistent with billing engine)
 pub fn calculate_gst(amount_paise: i64, gst_percentage_x100: i32) -> i64 {
-    (amount_paise * gst_percentage_x100 as i64) / 10000
+    ((amount_paise * gst_percentage_x100 as i64) + 5000) / 10000
 }
 
 /// Calculates discount amount in paise

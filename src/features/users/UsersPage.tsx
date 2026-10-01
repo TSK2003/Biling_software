@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 import {
   Plus,
   Edit2,
@@ -7,8 +8,6 @@ import {
   Power,
   Eye,
   EyeOff,
-  Copy,
-  Check,
   ShoppingCart,
   Receipt,
   LayoutDashboard,
@@ -16,10 +15,10 @@ import {
   Layers,
   FileText,
   HardDrive,
-  Users,
   CheckSquare,
   Square,
   ShieldCheck,
+  Wallet,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
 import { Modal } from '../../components/Modal';
@@ -74,6 +73,13 @@ const ALL_SCREENS: ScreenDefinition[] = [
     icon: Layers,
   },
   {
+    id: 'expenses',
+    label: 'Expenses',
+    category: 'Billing & Operations',
+    description: 'Record operating expenses, manage expense categories, and monitor cash outflows',
+    icon: Wallet,
+  },
+  {
     id: 'reports',
     label: 'Sales Reports',
     category: 'Reports & Tools',
@@ -87,23 +93,12 @@ const ALL_SCREENS: ScreenDefinition[] = [
     description: 'Standalone Zip database backup archives and Excel product import',
     icon: HardDrive,
   },
-  {
-    id: 'users',
-    label: 'Staff & Users',
-    category: 'Reports & Tools',
-    description: 'Manage staff cashier accounts, passwords, and module permissions',
-    icon: Users,
-  },
 ];
 
 export const UsersPage: React.FC = () => {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isAdmin } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Visible passwords state (keyed by user ID)
-  const [revealedPasswords, setRevealedPasswords] = useState<Record<number, boolean>>({});
-  const [copiedId, setCopiedId] = useState<number | null>(null);
 
   // Add / Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -113,20 +108,20 @@ export const UsersPage: React.FC = () => {
   const [formPassword, setFormPassword] = useState('');
   const [showFormPassword, setShowFormPassword] = useState(false);
   const [formRoleName, setFormRoleName] = useState('Cashier');
-  const [formPermissions, setFormPermissions] = useState<ScreenPermission[]>([
-    'billing',
-    'bills',
-    'dashboard',
-    'products',
-    'categories',
-    'reports',
-  ]);
+  const [formPermissions, setFormPermissions] = useState<ScreenPermission[]>(
+    ALL_SCREENS.map((s) => s.id)
+  );
   const [formMaxDiscount, setFormMaxDiscount] = useState('10');
   const [isSaving, setIsSaving] = useState(false);
 
   // Delete Confirmation Modal
   const [deletingUser, setDeletingUser] = useState<User | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Non-admins should not access Staff & Users management
+  if (!isAdmin && currentUser) {
+    return <Navigate to="/billing" replace />;
+  }
 
   const loadUsers = async () => {
     setIsLoading(true);
@@ -143,21 +138,6 @@ export const UsersPage: React.FC = () => {
   useEffect(() => {
     loadUsers();
   }, []);
-
-  const togglePasswordVisibility = (userId: number) => {
-    setRevealedPasswords((prev) => ({
-      ...prev,
-      [userId]: !prev[userId],
-    }));
-  };
-
-  const handleCopyPassword = (userId: number, pass?: string) => {
-    if (!pass) return;
-    navigator.clipboard.writeText(pass);
-    setCopiedId(userId);
-    toast.success('Password copied to clipboard');
-    setTimeout(() => setCopiedId(null), 2000);
-  };
 
   const toggleScreenPermission = (screenId: ScreenPermission) => {
     setFormPermissions((prev) =>
@@ -181,7 +161,8 @@ export const UsersPage: React.FC = () => {
     setFormDisplayName('');
     setFormPassword('');
     setShowFormPassword(false);
-    setFormPermissions(['billing', 'bills', 'dashboard', 'products', 'categories', 'reports']);
+    setFormRoleName('Cashier');
+    setFormPermissions(['billing', 'bills']);
     setFormMaxDiscount('10');
     setIsModalOpen(true);
   };
@@ -190,17 +171,16 @@ export const UsersPage: React.FC = () => {
     setEditingUser(u);
     setFormUsername(u.username);
     setFormDisplayName(u.display_name);
-    setFormPassword(u.plain_password || '');
+    setFormPassword('');
     setShowFormPassword(false);
     setFormRoleName(u.role || 'Staff');
+    const existing = (u.permissions || []).filter(
+      (p) => p !== 'users' && p !== 'settings'
+    ) as ScreenPermission[];
     setFormPermissions(
-      u.permissions && u.permissions.length > 0
-        ? (u.permissions as ScreenPermission[])
-        : u.role.toLowerCase() === 'admin'
-        ? ALL_SCREENS.map((s) => s.id)
-        : ['billing', 'bills', 'dashboard', 'products', 'categories', 'reports']
+      u.permissions !== undefined && u.permissions !== null ? existing : ['billing', 'bills']
     );
-    setFormMaxDiscount(String(u.max_discount_pct));
+    setFormMaxDiscount(String(u.max_discount_pct ?? 10));
     setIsModalOpen(true);
   };
 
@@ -320,19 +300,16 @@ export const UsersPage: React.FC = () => {
             <table className="table w-full">
               <thead>
                 <tr>
-                  <th className="w-[26%] text-left px-5 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                  <th className="w-[30%] text-left px-5 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
                     User & Display Name
                   </th>
-                  <th className="w-[14%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                  <th className="w-[16%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
                     Role / Position
                   </th>
-                  <th className="w-[18%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
-                    Admin Password View
-                  </th>
-                  <th className="w-[18%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                  <th className="w-[24%] text-left px-4 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
                     Screen Access
                   </th>
-                  <th className="w-[8%] text-center px-3 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
+                  <th className="w-[10%] text-center px-3 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
                     Max Disc
                   </th>
                   <th className="w-[8%] text-center px-3 py-3.5 text-2xs font-bold text-surface-500 uppercase tracking-wider bg-surface-50/80 border-b border-surface-200">
@@ -346,23 +323,21 @@ export const UsersPage: React.FC = () => {
               <tbody className="divide-y divide-surface-100">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-surface-400">
+                    <td colSpan={6} className="text-center py-12 text-surface-400">
                       <div className="spinner mx-auto mb-2" />
                       Loading staff accounts...
                     </td>
                   </tr>
                 ) : users.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12 text-surface-400">
+                    <td colSpan={6} className="text-center py-12 text-surface-400">
                       No user accounts found. Click "Create New User" to add one.
                     </td>
                   </tr>
                 ) : (
                   users.map((u) => {
-                    const isPassRevealed = revealedPasswords[u.id];
-                    const isCopied = copiedId === u.id;
-                    const perms = u.permissions || [];
-                    const isFullAdmin = u.role.toLowerCase() === 'admin' || perms.length === ALL_SCREENS.length;
+                    const perms = (u.permissions || []).filter((p) => p !== 'users' && p !== 'settings');
+                    const isFullAdmin = u.role.toLowerCase() === 'admin';
 
                     return (
                       <tr
@@ -406,55 +381,16 @@ export const UsersPage: React.FC = () => {
                           </span>
                         </td>
 
-                        {/* 3. Password View (Admin Only) */}
-                        <td className="px-4 py-3.5">
-                          <div className="flex items-center gap-2">
-                            <div className="font-mono text-xs bg-surface-50 px-2.5 py-1 rounded-md border border-surface-200 min-w-[100px] flex items-center justify-between">
-                              <span>
-                                {isPassRevealed
-                                  ? u.plain_password || 'admin123'
-                                  : '••••••••'}
-                              </span>
-                              {isPassRevealed && u.plain_password && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyPassword(u.id, u.plain_password)}
-                                  className="ml-1 text-surface-400 hover:text-primary-600 p-0.5 transition-colors"
-                                  title="Copy password"
-                                >
-                                  {isCopied ? (
-                                    <Check className="w-3 h-3 text-emerald-600" />
-                                  ) : (
-                                    <Copy className="w-3 h-3" />
-                                  )}
-                                </button>
-                              )}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => togglePasswordVisibility(u.id)}
-                              className="p-1 text-surface-400 hover:text-surface-700 hover:bg-surface-100 rounded-md transition-colors"
-                              title={isPassRevealed ? 'Hide password' : 'View password'}
-                            >
-                              {isPassRevealed ? (
-                                <EyeOff className="w-3.5 h-3.5 text-primary-600" />
-                              ) : (
-                                <Eye className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          </div>
-                        </td>
-
                         {/* 4. Screen Checkpoints Badge */}
                         <td className="px-4 py-3.5">
                           {isFullAdmin ? (
                             <span className="inline-flex items-center text-2xs font-semibold px-2.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              All Screens (9/9)
+                              Full Admin Access
                             </span>
                           ) : (
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="text-2xs font-mono font-semibold px-2 py-0.5 rounded-md bg-primary-50 text-primary-700 border border-primary-200">
-                                {perms.length} Screens
+                                {perms.length} / {ALL_SCREENS.length} Screens
                               </span>
                               <span className="text-2xs text-surface-500 truncate max-w-[120px]">
                                 ({perms.slice(0, 2).join(', ')}{perms.length > 2 ? ` +${perms.length - 2}` : ''})
