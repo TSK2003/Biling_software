@@ -363,9 +363,14 @@ pub fn update_product(
     }
     
     // Audit log
+    let details_json = serde_json::json!({
+        "product_id": id,
+        "name": name,
+        "selling_price_paise": selling_price_paise,
+    }).to_string();
     let _ = db.conn.execute(
-        "INSERT INTO audit_logs (action, entity_type, entity_id) VALUES ('update', 'product', ?1)",
-        rusqlite::params![id],
+        "INSERT INTO audit_logs (action, entity_type, entity_id, details_json) VALUES ('update', 'product', ?1, ?2)",
+        rusqlite::params![id, details_json],
     );
     
     get_product_by_id(&db.conn, id)

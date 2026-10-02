@@ -64,30 +64,70 @@ pub fn print_receipt(
 ) -> Result<String, String> {
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
 
-    // Load shop branding settings from database
-    let shop_name: String = db.conn.query_row(
-        "SELECT value FROM settings WHERE key = 'shop_name'",
+    // Load shop branding settings and print toggles from database
+    let print_shop_name: bool = db.conn.query_row(
+        "SELECT value FROM settings WHERE key = 'print_shop_name'",
         [],
-        |r| r.get(0),
-    ).unwrap_or_else(|_| "Billing Software".to_string());
+        |r| r.get::<_, String>(0),
+    ).map(|v| !v.trim().eq_ignore_ascii_case("false")).unwrap_or(true);
 
-    let shop_phone: String = db.conn.query_row(
-        "SELECT value FROM settings WHERE key = 'shop_phone'",
-        [],
-        |r| r.get(0),
-    ).unwrap_or_default();
+    let shop_name: String = if print_shop_name {
+        db.conn.query_row(
+            "SELECT value FROM settings WHERE key = 'shop_name'",
+            [],
+            |r| r.get(0),
+        ).unwrap_or_else(|_| "Billing Software".to_string())
+    } else {
+        String::new()
+    };
 
-    let shop_address: String = db.conn.query_row(
-        "SELECT value FROM settings WHERE key = 'shop_address'",
+    let print_shop_phone: bool = db.conn.query_row(
+        "SELECT value FROM settings WHERE key = 'print_shop_phone'",
         [],
-        |r| r.get(0),
-    ).unwrap_or_default();
+        |r| r.get::<_, String>(0),
+    ).map(|v| !v.trim().eq_ignore_ascii_case("false")).unwrap_or(true);
 
-    let shop_email: String = db.conn.query_row(
-        "SELECT value FROM settings WHERE key = 'shop_email'",
+    let shop_phone: String = if print_shop_phone {
+        db.conn.query_row(
+            "SELECT value FROM settings WHERE key = 'shop_phone'",
+            [],
+            |r| r.get(0),
+        ).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let print_shop_address: bool = db.conn.query_row(
+        "SELECT value FROM settings WHERE key = 'print_shop_address'",
         [],
-        |r| r.get(0),
-    ).unwrap_or_default();
+        |r| r.get::<_, String>(0),
+    ).map(|v| !v.trim().eq_ignore_ascii_case("false")).unwrap_or(true);
+
+    let shop_address: String = if print_shop_address {
+        db.conn.query_row(
+            "SELECT value FROM settings WHERE key = 'shop_address'",
+            [],
+            |r| r.get(0),
+        ).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let print_shop_email: bool = db.conn.query_row(
+        "SELECT value FROM settings WHERE key = 'print_shop_email'",
+        [],
+        |r| r.get::<_, String>(0),
+    ).map(|v| !v.trim().eq_ignore_ascii_case("false")).unwrap_or(true);
+
+    let shop_email: String = if print_shop_email {
+        db.conn.query_row(
+            "SELECT value FROM settings WHERE key = 'shop_email'",
+            [],
+            |r| r.get(0),
+        ).unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     let shop_gst_enabled: bool = db.conn.query_row(
         "SELECT value FROM settings WHERE key = 'gst_enabled'",
@@ -105,28 +145,58 @@ pub fn print_receipt(
         String::new()
     };
 
-    let fssai_number: String = db.conn.query_row(
-        "SELECT value FROM settings WHERE key = 'fssai_number'",
+    let print_fssai_number: bool = db.conn.query_row(
+        "SELECT value FROM settings WHERE key = 'print_fssai_number'",
         [],
-        |r| r.get(0),
-    ).unwrap_or_default();
+        |r| r.get::<_, String>(0),
+    ).map(|v| !v.trim().eq_ignore_ascii_case("false")).unwrap_or(true);
 
-    let shop_logo: String = request.shop_logo.clone()
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| {
-            db.conn.query_row(
-                "SELECT value FROM settings WHERE key = 'shop_logo'",
-                [],
-                |r| r.get(0),
-            ).ok().filter(|s: &String| !s.trim().is_empty())
-        })
-        .unwrap_or_default();
+    let fssai_number: String = if print_fssai_number {
+        db.conn.query_row(
+            "SELECT value FROM settings WHERE key = 'fssai_number'",
+            [],
+            |r| r.get(0),
+        ).unwrap_or_default()
+    } else {
+        String::new()
+    };
 
-    let receipt_footer: String = db.conn.query_row(
-        "SELECT value FROM settings WHERE key = 'receipt_footer_note'",
+    let print_shop_logo: bool = db.conn.query_row(
+        "SELECT value FROM settings WHERE key = 'print_shop_logo'",
         [],
-        |r| r.get(0),
-    ).unwrap_or_else(|_| "Thank you for shopping with us! Please visit again.".to_string());
+        |r| r.get::<_, String>(0),
+    ).map(|v| !v.trim().eq_ignore_ascii_case("false")).unwrap_or(true);
+
+    let shop_logo: String = if print_shop_logo {
+        request.shop_logo.clone()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                db.conn.query_row(
+                    "SELECT value FROM settings WHERE key = 'shop_logo'",
+                    [],
+                    |r| r.get(0),
+                ).ok().filter(|s: &String| !s.trim().is_empty())
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let print_receipt_footer: bool = db.conn.query_row(
+        "SELECT value FROM settings WHERE key = 'print_receipt_footer'",
+        [],
+        |r| r.get::<_, String>(0),
+    ).map(|v| !v.trim().eq_ignore_ascii_case("false")).unwrap_or(true);
+
+    let receipt_footer: String = if print_receipt_footer {
+        db.conn.query_row(
+            "SELECT value FROM settings WHERE key = 'receipt_footer_note'",
+            [],
+            |r| r.get(0),
+        ).unwrap_or_else(|_| "Thank you for shopping with us! Please visit again.".to_string())
+    } else {
+        String::new()
+    };
 
     // Resolve target printer
     let target_printer = request.printer_name

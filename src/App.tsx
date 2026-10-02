@@ -5,7 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LicenseProvider, useLicense } from './contexts/LicenseContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { NetworkProvider } from './contexts/NetworkContext';
-import { api, isClientMode } from './lib/ipc';
+import { isClientMode } from './lib/ipc';
 import type { ScreenPermission } from './types';
 
 import { Layout } from './components/Layout';
@@ -53,28 +53,6 @@ const ProtectedRoute: React.FC<{
 
 const AppContent: React.FC = () => {
   const { isActivated, isLoading } = useLicense();
-
-  // Automatic Daily Backup: Runs silently on software launch and continues daily
-  React.useEffect(() => {
-    if (isActivated && !isClientMode()) {
-      api.checkDailyBackup()
-        .then((result) => {
-          if (result) {
-            console.log('[Daily Auto-Backup] Fresh daily snapshot recorded:', result.backup_path);
-          }
-        })
-        .catch((err) => {
-          console.warn('[Daily Auto-Backup] Check error:', err);
-        });
-
-      // Periodically check every 30 minutes in case the application runs overnight across midnight
-      const interval = setInterval(() => {
-        api.checkDailyBackup().catch(() => {});
-      }, 30 * 60 * 1000);
-
-      return () => clearInterval(interval);
-    }
-  }, [isActivated]);
 
   if (isLoading) {
     return (

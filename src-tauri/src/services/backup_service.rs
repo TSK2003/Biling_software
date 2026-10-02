@@ -966,42 +966,14 @@ impl BackupService {
         Ok(list)
     }
 
-    /// Automatically run a daily backup once every day
-    pub fn run_daily_auto_backup_if_needed(db: &Database) -> Result<Option<BackupRecord>, String> {
-        let enabled: String = db.conn.query_row(
-            "SELECT value FROM settings WHERE key = 'auto_backup_enabled'",
-            [],
-            |r| r.get(0),
-        ).unwrap_or_else(|_| "true".to_string());
-
-        if enabled.trim().eq_ignore_ascii_case("false") {
-            return Ok(None);
-        }
-
-        let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let last_date: Option<String> = db.conn.query_row(
-            "SELECT value FROM settings WHERE key = 'last_auto_backup_date'",
-            [],
-            |r| r.get(0),
-        ).ok();
-
-        if let Some(ref d) = last_date {
-            if d == &today_str {
-                return Ok(None); // Already created today
-            }
-        }
-
-        let record = Self::create_full_backup(db, "daily_auto")?;
-        Ok(Some(record))
+    /// Automatic daily backup is disabled by user requirement (strictly manual on-demand backups)
+    pub fn run_daily_auto_backup_if_needed(_db: &Database) -> Result<Option<BackupRecord>, String> {
+        Ok(None)
     }
 
-    /// Get current configuration and status of automatic daily backups
+    /// Get current configuration and status of manual backups
     pub fn get_auto_backup_status(db: &Database) -> Result<crate::models::AutoBackupStatus, String> {
-        let enabled: bool = db.conn.query_row(
-            "SELECT value FROM settings WHERE key = 'auto_backup_enabled'",
-            [],
-            |r| r.get::<_, String>(0),
-        ).map(|v| !v.trim().eq_ignore_ascii_case("false")).unwrap_or(true);
+        let enabled = false;
 
         let last_date: Option<String> = db.conn.query_row(
             "SELECT value FROM settings WHERE key = 'last_auto_backup_date'",

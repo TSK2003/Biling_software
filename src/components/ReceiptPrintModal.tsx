@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { Modal } from './Modal';
 import { api } from '../lib/ipc';
 import { useSettings } from '../contexts/SettingsContext';
-import { formatCurrency, amountInWordsINR, formatDateDMY, formatPaymentMethod } from '../lib/format';
+import { formatCurrency, amountInWordsINR, formatDateDMY, formatPaymentMethod, getGlobalCurrencySymbol } from '../lib/format';
 import type { CartItem } from '../types';
 
 export interface ReceiptBillItem {
@@ -111,19 +111,23 @@ const Thermal80Receipt: React.FC<{
     >
       {/* Shop & Company Header */}
       <div className="text-center pb-2 border-b border-dashed border-surface-400">
-        <div className="flex justify-center mb-1.5">
-          <img
-            src={shopLogo || '/app_icon.png'}
-            alt={shopName}
-            className="h-10 object-contain max-w-[140px]"
-            onError={(e) => {
-              (e.target as HTMLElement).style.display = 'none';
-            }}
-          />
-        </div>
-        <h2 className="text-sm font-black tracking-wider uppercase text-black">
-          {shopName}
-        </h2>
+        {shopLogo && (
+          <div className="flex justify-center mb-1.5">
+            <img
+              src={shopLogo}
+              alt={shopName || 'Logo'}
+              className="h-10 object-contain max-w-[140px]"
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
+        {shopName && (
+          <h2 className="text-sm font-black tracking-wider uppercase text-black">
+            {shopName}
+          </h2>
+        )}
         {shopAddress && (
           <p className="text-3xs text-surface-700 mt-0.5 leading-snug whitespace-pre-line">
             {shopAddress}
@@ -288,13 +292,15 @@ const Thermal80Receipt: React.FC<{
       </div>
 
       {/* Footer Thank You Note with Clean Simple Alignment */}
-      <div className="pt-2.5 pb-0.5 text-center">
-        <div className="border-t border-dashed border-surface-400 pt-2">
-          <p className="font-extrabold text-black text-xs uppercase tracking-wider">
-            {receiptFooter || 'Thank You! Visit Again'}
-          </p>
+      {receiptFooter && (
+        <div className="pt-2.5 pb-0.5 text-center">
+          <div className="border-t border-dashed border-surface-400 pt-2">
+            <p className="font-extrabold text-black text-xs uppercase tracking-wider">
+              {receiptFooter}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
@@ -361,19 +367,23 @@ const Thermal58Receipt: React.FC<{
     >
       {/* Header */}
       <div className="text-center pb-1.5 border-b border-dashed border-surface-400">
-        <div className="flex justify-center mb-1">
-          <img
-            src={shopLogo || '/app_icon.png'}
-            alt={shopName}
-            className="h-8 object-contain max-w-[100px]"
-            onError={(e) => {
-              (e.target as HTMLElement).style.display = 'none';
-            }}
-          />
-        </div>
-        <h2 className="text-xs font-black tracking-wider uppercase text-black">
-          {shopName}
-        </h2>
+        {shopLogo && (
+          <div className="flex justify-center mb-1">
+            <img
+              src={shopLogo}
+              alt={shopName || 'Logo'}
+              className="h-8 object-contain max-w-[100px]"
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
+        {shopName && (
+          <h2 className="text-xs font-black tracking-wider uppercase text-black">
+            {shopName}
+          </h2>
+        )}
         {shopAddress && (
           <p className="text-4xs text-surface-700 mt-0.5 leading-tight">{shopAddress}</p>
         )}
@@ -497,13 +507,15 @@ const Thermal58Receipt: React.FC<{
       </div>
 
       {/* Footer Thank You Note */}
-      <div className="pt-2 pb-0.5 text-center">
-        <div className="border-t border-dashed border-surface-400 pt-1.5">
-          <p className="font-extrabold text-black uppercase text-3xs tracking-wider">
-            {receiptFooter || 'Thank You! Visit Again'}
-          </p>
+      {receiptFooter && (
+        <div className="pt-2 pb-0.5 text-center">
+          <div className="border-t border-dashed border-surface-400 pt-1.5">
+            <p className="font-extrabold text-black uppercase text-3xs tracking-wider">
+              {receiptFooter}
+            </p>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
@@ -576,23 +588,29 @@ const A4TaxInvoice: React.FC<{
       {/* Top Banner: Tax Invoice Label & Company Header */}
       <div className="flex items-center justify-between border-b-2 border-surface-900 pb-3 mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-lg bg-surface-50 border border-surface-200 flex items-center justify-center p-1 overflow-hidden flex-shrink-0">
-            <img
-              src={shopLogo || '/app_icon.png'}
-              alt={shopName}
-              className="w-full h-full object-contain"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
-            />
-          </div>
+          {shopLogo && (
+            <div className="w-12 h-12 rounded-lg bg-surface-50 border border-surface-200 flex items-center justify-center p-1 overflow-hidden flex-shrink-0">
+              <img
+                src={shopLogo}
+                alt={shopName || 'Logo'}
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+            </div>
+          )}
           <div>
-            <h1 className="text-lg font-black tracking-wide text-surface-950 uppercase">
-              {shopName}
-            </h1>
-            <p className="text-2xs text-surface-600 font-medium whitespace-pre-line max-w-sm">
-              {shopAddress || 'Store Location & Billing Desk'}
-            </p>
+            {shopName && (
+              <h1 className="text-lg font-black tracking-wide text-surface-950 uppercase">
+                {shopName}
+              </h1>
+            )}
+            {shopAddress && (
+              <p className="text-2xs text-surface-600 font-medium whitespace-pre-line max-w-sm">
+                {shopAddress}
+              </p>
+            )}
             <div className="flex items-center gap-3 text-2xs text-surface-700 font-semibold mt-0.5">
               {shopPhone && <span>Phone: {shopPhone}</span>}
               {shopEmail && <span>Email: {shopEmail}</span>}
@@ -648,7 +666,7 @@ const A4TaxInvoice: React.FC<{
               <th className="py-2 px-2.5 w-[10%] text-center">Qty</th>
               <th className="py-2 px-2.5 w-[14%] text-right">Unit Rate</th>
               <th className="py-2 px-2.5 w-[10%] text-right">Disc</th>
-              <th className="py-2 px-2.5 w-[15%] text-right">{gstEnabled ? 'Amount (₹)' : 'Total (₹)'}</th>
+              <th className="py-2 px-2.5 w-[15%] text-right">{gstEnabled ? `Amount (${getGlobalCurrencySymbol()})` : `Total (${getGlobalCurrencySymbol()})`}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-surface-200">
@@ -760,7 +778,7 @@ const A4TaxInvoice: React.FC<{
 
             <div className="flex justify-between items-center text-surface-700 py-1">
               <span>Round Off:</span>
-              <span className="font-mono text-surface-500">₹0.00</span>
+              <span className="font-mono text-surface-500">{formatCurrency(0)}</span>
             </div>
           </div>
 
@@ -777,14 +795,16 @@ const A4TaxInvoice: React.FC<{
       {/* Signatory & AESCION Footer Strip */}
       <div className="pt-4 border-t border-surface-300 flex items-end justify-between text-2xs">
         <div className="text-3xs text-surface-600 space-y-1 max-w-md">
-          <p className="font-bold text-surface-900 text-xs uppercase tracking-wide">
-            {receiptFooter || 'Thank You! Visit Again'}
-          </p>
+          {receiptFooter && (
+            <p className="font-bold text-surface-900 text-xs uppercase tracking-wide">
+              {receiptFooter}
+            </p>
+          )}
           <p>{gstEnabled ? 'This is a computer generated tax invoice.' : 'This is a computer generated cash bill.'}</p>
         </div>
 
         <div className="text-center w-48">
-          <div className="font-bold text-surface-900 text-2xs mb-8">For {shopName.toUpperCase()}</div>
+          <div className="font-bold text-surface-900 text-2xs mb-8">For {(shopName || 'AUTHORIZED STORE').toUpperCase()}</div>
           <div className="border-t border-surface-400 pt-1 text-3xs font-semibold text-surface-600 uppercase">
             Authorized Signatory
           </div>
@@ -840,14 +860,22 @@ export const ReceiptPrintModal: React.FC<ReceiptPrintModalProps> = ({
     Number(localStorage.getItem('pos_saved_printer_copies')) ||
     1;
 
-  const shopName = settings['shop_name'] || 'AESCION BILLING';
-  const shopPhone = settings['shop_phone'] || '';
-  const shopAddress = settings['shop_address'] || '';
-  const shopEmail = settings['shop_email'] || '';
-  const shopLogo = settings['shop_logo'] || '';
+  const printShopLogo = settings['print_shop_logo'] !== 'false';
+  const printShopName = settings['print_shop_name'] !== 'false';
+  const printShopPhone = settings['print_shop_phone'] !== 'false';
+  const printShopAddress = settings['print_shop_address'] !== 'false';
+  const printShopEmail = settings['print_shop_email'] !== 'false';
+  const printFssaiNumber = settings['print_fssai_number'] !== 'false';
+  const printReceiptFooter = settings['print_receipt_footer'] !== 'false';
+
+  const shopName = printShopName ? (settings['shop_name'] || 'AESCION BILLING') : '';
+  const shopPhone = printShopPhone ? (settings['shop_phone'] || '') : '';
+  const shopAddress = printShopAddress ? (settings['shop_address'] || '') : '';
+  const shopEmail = printShopEmail ? (settings['shop_email'] || '') : '';
+  const shopLogo = printShopLogo ? (settings['shop_logo'] || '') : '';
   const gstNumber = settings['gst_number'] || '';
-  const fssaiNumber = settings['fssai_number'] || '';
-  const receiptFooter = settings['receipt_footer_note'] || 'Thank you for shopping with us! Please visit again.';
+  const fssaiNumber = printFssaiNumber ? (settings['fssai_number'] || '') : '';
+  const receiptFooter = printReceiptFooter ? (settings['receipt_footer_note'] || 'Thank you for shopping with us! Please visit again.') : '';
 
   const [isPrinting, setIsPrinting] = useState(false);
 

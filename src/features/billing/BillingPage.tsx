@@ -16,6 +16,9 @@ import {
   AlertTriangle,
   Ban,
   Sparkles,
+  Receipt,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
 import { useAuth } from '../../contexts/AuthContext';
@@ -168,7 +171,7 @@ export const BillingPage: React.FC = () => {
       // If last tab: just reset instead of closing
       if (tabs.length <= 1) {
         setTabs([createNewTab(1)]);
-        if (user?.id) api.deleteDraft(user.id);
+        if (user?.id) api.deleteDraft(user.id).catch(() => {});
         toast.success('Bill 1 cleared');
         return;
       }
@@ -199,6 +202,51 @@ export const BillingPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [products, setProducts] = useState<BillingProduct[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Category Pills Horizontal Scroll State & Helpers
+  const categoryScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollCatLeft, setCanScrollCatLeft] = useState(false);
+  const [canScrollCatRight, setCanScrollCatRight] = useState(false);
+
+  const checkCategoryScroll = useCallback(() => {
+    const el = categoryScrollRef.current;
+    if (el) {
+      const hasOverflow = el.scrollWidth > el.clientWidth + 2;
+      setCanScrollCatLeft(el.scrollLeft > 4);
+      setCanScrollCatRight(hasOverflow && el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkCategoryScroll();
+    const raf = requestAnimationFrame(checkCategoryScroll);
+    const timer = setTimeout(checkCategoryScroll, 120);
+
+    const el = categoryScrollRef.current;
+    let ro: ResizeObserver | null = null;
+    if (el && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => checkCategoryScroll());
+      ro.observe(el);
+    }
+
+    const handleResize = () => checkCategoryScroll();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      window.removeEventListener('resize', handleResize);
+      if (ro) ro.disconnect();
+    };
+  }, [categories, checkCategoryScroll]);
+
+  const handleScrollCategories = (direction: 'left' | 'right') => {
+    if (categoryScrollRef.current) {
+      const scrollAmount = direction === 'left' ? -260 : 260;
+      categoryScrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+      setTimeout(checkCategoryScroll, 150);
+      setTimeout(checkCategoryScroll, 350);
+    }
+  };
 
   // Payment Modal State
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
@@ -342,9 +390,9 @@ export const BillingPage: React.FC = () => {
           user.id,
           JSON.stringify(cart),
           JSON.stringify({ discount_type: discountType, discount_value: discountValue })
-        );
+        ).catch(() => {});
       } else {
-        api.deleteDraft(user.id);
+        api.deleteDraft(user.id).catch(() => {});
       }
     }, 2000);
     return () => clearTimeout(saveTimer);
@@ -543,7 +591,7 @@ export const BillingPage: React.FC = () => {
       discountType: 'none',
       discountValue: 0,
     }));
-    if (user?.id) api.deleteDraft(user.id);
+    if (user?.id) api.deleteDraft(user.id).catch(() => {});
   };
 
   // ========= Monetary Calculations (Strict Integer Paise) =========
@@ -717,7 +765,7 @@ export const BillingPage: React.FC = () => {
         }));
       }
 
-      if (user?.id) api.deleteDraft(user.id);
+      if (user?.id) api.deleteDraft(user.id).catch(() => {});
       api.getNextBillNumber().then((n) => setNextBillNumber(n)).catch(() => setNextBillNumber((p) => p + 1));
       api.getBillingProducts(selectedCategory || undefined, searchQuery.trim() || undefined).then(setProducts).catch(console.error);
       toast.success(`Bill #${response.bill_number} generated successfully!`);
@@ -748,7 +796,7 @@ export const BillingPage: React.FC = () => {
   };
 
   const handleDiscardDraft = () => {
-    if (user?.id) api.deleteDraft(user.id);
+    if (user?.id) api.deleteDraft(user.id).catch(() => {});
     setIsRecoveryOpen(false);
   };
 
@@ -763,7 +811,7 @@ export const BillingPage: React.FC = () => {
         subtitle="Quick order entry and instant checkout"
         actions={
           <div className="flex items-center gap-1.5 lg:gap-2">
-            <span className="text-xs font-mono font-bold text-primary-700 bg-primary-50 px-2.5 py-1.5 rounded-lg border border-primary-200 shadow-2xs whitespace-nowrap">
+            <span className="text-xs font-mono font-bold text-white bg-primary-800 px-3 py-1.5 rounded-lg border border-primary-900 shadow-xs whitespace-nowrap">
               Bill: {String(nextBillNumber).padStart(5, '0')}
             </span>
             <span className="text-xs font-mono text-surface-600 bg-surface-100 px-2.5 py-1.5 rounded-lg border border-surface-200 whitespace-nowrap hidden 2xl:inline-block">
@@ -778,11 +826,11 @@ export const BillingPage: React.FC = () => {
         {/* Left Column: Category Tabs + Search + Products Catalog */}
         <div className="flex-1 flex flex-col min-w-0 bg-white rounded-xl border border-surface-200 shadow-card overflow-hidden">
           {/* Search Bar & Category Filter Bar */}
-          <div className="p-3.5 border-b border-surface-200 space-y-3 bg-surface-50/50">
+          <div className="p-3 sm:p-3.5 border-b border-surface-200 space-y-2.5 sm:space-y-3 bg-surface-50/50">
             {/* Search Input + Custom Item Button */}
-            <div className="flex items-center gap-2.5">
-              <div className="relative flex-1">
-                <Search className="w-5 h-5 text-surface-400 absolute left-3.5 top-3.5" />
+            <div className="flex items-center gap-2 sm:gap-2.5">
+              <div className="relative flex-1 min-w-0">
+                <Search className="w-5 h-5 text-surface-400 absolute left-3.5 top-3 sm:top-3.5 pointer-events-none" />
                 <input
                   ref={searchInputRef}
                   id="billing-search-input"
@@ -824,12 +872,12 @@ export const BillingPage: React.FC = () => {
                     }
                   }}
                   placeholder="Scan barcode or search products... [F2]"
-                  className="form-input pl-11 h-12 text-base shadow-xs"
+                  className="form-input pl-11 h-11 sm:h-12 text-sm sm:text-base shadow-xs"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-3.5 text-sm text-surface-400 hover:text-surface-600 font-medium"
+                    className="absolute right-3 top-3 sm:top-3.5 text-sm text-surface-400 hover:text-surface-600 font-medium"
                   >
                     Clear
                   </button>
@@ -837,40 +885,93 @@ export const BillingPage: React.FC = () => {
               </div>
               <button
                 onClick={() => setIsCustomItemOpen(true)}
-                className="btn-secondary flex items-center gap-2 whitespace-nowrap text-base font-semibold h-12 px-4 shadow-xs"
+                className="btn-secondary flex items-center gap-1.5 sm:gap-2 whitespace-nowrap text-sm sm:text-base font-bold h-11 sm:h-12 px-3 sm:px-4 shadow-xs shrink-0 text-primary-900 border-primary-300 hover:bg-primary-50"
                 title="Add a custom item directly to the bill"
               >
-                <PackagePlus className="w-5 h-5 text-primary-600" />
+                <PackagePlus className="w-4 h-4 sm:w-5 sm:h-5 text-primary-800 shrink-0" />
                 <span>Custom Item</span>
               </button>
             </div>
 
-            {/* Category Filter Pills */}
-            <div className="flex items-center gap-2.5 overflow-x-auto pb-1 no-scrollbar">
+            {/* Category Filter Pills Bar with Clear Navigation Controls & Mouse Wheel Scrolling */}
+            <div className="flex items-center gap-1.5 w-full">
+              {/* Left Scroll Chevron Button */}
               <button
-                onClick={() => setSelectedCategory(null)}
-                className={`category-tab ${
-                  selectedCategory === null ? 'active' : ''
+                type="button"
+                onClick={() => handleScrollCategories('left')}
+                disabled={!canScrollCatLeft}
+                className={`h-9 w-7.5 rounded-lg flex items-center justify-center shrink-0 transition-all border ${
+                  canScrollCatLeft
+                    ? 'bg-white hover:bg-surface-100 text-surface-800 hover:text-primary-800 border-surface-300 shadow-xs cursor-pointer active:scale-95'
+                    : 'bg-surface-100/60 text-surface-300 border-surface-200 cursor-not-allowed opacity-30'
                 }`}
+                title="Scroll categories left"
               >
-                All Items
+                <ChevronLeft className="w-4 h-4 font-bold" />
               </button>
-              {categories.map((cat) => (
+
+              {/* Scrollable Container with Native Mouse Wheel & Smooth Scrolling */}
+              <div
+                ref={categoryScrollRef}
+                onScroll={checkCategoryScroll}
+                onWheel={(e) => {
+                  const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+                  if (delta !== 0 && categoryScrollRef.current) {
+                    categoryScrollRef.current.scrollLeft += delta;
+                    checkCategoryScroll();
+                  }
+                }}
+                className="flex items-center gap-2 overflow-x-auto py-0.5 no-scrollbar flex-nowrap flex-1 min-w-0 scroll-smooth"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+              >
                 <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`category-tab ${
-                    selectedCategory === cat.id ? 'active' : ''
+                  type="button"
+                  onClick={(e) => {
+                    setSelectedCategory(null);
+                    (e.currentTarget as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+                  }}
+                  className={`category-tab shrink-0 ${
+                    selectedCategory === null ? 'active' : ''
                   }`}
                 >
-                  {cat.name}
+                  All Items
                 </button>
-              ))}
+                {categories.map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={(e) => {
+                      setSelectedCategory(cat.id);
+                      (e.currentTarget as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+                    }}
+                    className={`category-tab shrink-0 ${
+                      selectedCategory === cat.id ? 'active' : ''
+                    }`}
+                  >
+                    {cat.name}
+                  </button>
+                ))}
+              </div>
+
+              {/* Right Scroll Chevron Button */}
+              <button
+                type="button"
+                onClick={() => handleScrollCategories('right')}
+                disabled={!canScrollCatRight}
+                className={`h-9 w-7.5 rounded-lg flex items-center justify-center shrink-0 transition-all border ${
+                  canScrollCatRight
+                    ? 'bg-white hover:bg-surface-100 text-surface-800 hover:text-primary-800 border-surface-300 shadow-xs cursor-pointer active:scale-95'
+                    : 'bg-surface-100/60 text-surface-300 border-surface-200 cursor-not-allowed opacity-30'
+                }`}
+                title="Scroll categories right"
+              >
+                <ChevronRight className="w-4 h-4 font-bold" />
+              </button>
             </div>
           </div>
 
           {/* Product Cards Grid */}
-          <div className="flex-1 p-3 overflow-y-auto">
+          <div className="flex-1 p-2.5 sm:p-3 overflow-y-auto">
             {isLoading ? (
               <div className="h-full flex items-center justify-center text-surface-400">
                 <div className="spinner mr-2" /> Loading catalog...
@@ -883,7 +984,7 @@ export const BillingPage: React.FC = () => {
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-2.5">
                 {products.map((product) => {
                   const isRestockable = !!product.is_restockable;
                   const currentStock = product.current_stock ?? 0;
@@ -921,7 +1022,7 @@ export const BillingPage: React.FC = () => {
                     >
                       <div>
                         {/* Product Image preview or initial fallback */}
-                        <div className="relative w-full aspect-[4/3] rounded-lg bg-surface-100 mb-2 flex items-center justify-center text-primary-600 font-black text-3xl overflow-hidden group-hover:bg-primary-50 transition-colors">
+                        <div className="relative w-full aspect-[4/3] rounded-lg bg-surface-100 mb-2 flex items-center justify-center text-primary-700 font-black text-3xl overflow-hidden group-hover:bg-primary-50 transition-colors">
                           {product.image_path ? (
                             <img
                               src={product.image_path}
@@ -955,25 +1056,25 @@ export const BillingPage: React.FC = () => {
                         <div className="product-card-name" title={product.name}>
                           {product.name}
                         </div>
-                        <div className="flex items-center justify-between mt-0.5">
-                          <div
-                            className="product-card-code"
+                        <div className="flex items-center justify-between gap-1 mt-1 min-w-0">
+                          <span
+                            className="product-card-code truncate"
                             title={product.product_code}
                           >
                             {product.product_code}
-                          </div>
+                          </span>
                           {isRestockable && currentStock > 5 && (
-                            <span className="text-xs font-mono font-bold text-surface-600">
+                            <span className="text-[10px] sm:text-[11px] font-mono font-bold text-surface-600 bg-surface-100/90 px-1.5 py-0.5 rounded shrink-0 whitespace-nowrap">
                               {currentStock} in stock
                             </span>
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-surface-100 gap-1.5 min-w-0">
+                      <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-surface-100 gap-1 min-w-0">
                         <span className="product-card-price truncate tabular-nums min-w-0" title={formatCurrency(product.selling_price_paise)}>
                           {formatCurrency(product.selling_price_paise)}
                         </span>
-                        <span className="text-xs sm:text-sm bg-primary-50 group-hover:bg-primary-600 group-hover:text-white text-primary-700 px-2.5 py-1 rounded-lg font-extrabold transition-all shrink-0 whitespace-nowrap shadow-2xs group-hover:shadow-xs">
+                        <span className="text-2xs sm:text-xs bg-primary-100/90 group-hover:bg-primary-700 group-hover:text-white text-primary-900 px-2 py-1 rounded-md font-extrabold transition-all shrink-0 whitespace-nowrap shadow-2xs group-hover:shadow-xs">
                           +Add
                         </span>
                       </div>
@@ -985,95 +1086,118 @@ export const BillingPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Column: Active Cart Panel — Expanded Width */}
-        <div className="w-[440px] xl:w-[460px] flex flex-col bg-white rounded-xl border border-surface-200 shadow-card overflow-hidden">
-          {/* ======== MULTI-TAB BAR (Notepad++ Style) ======== */}
-          <div className="flex items-end gap-1 px-2.5 pt-2 pb-0 bg-surface-100/90 border-b border-surface-200 overflow-x-auto no-scrollbar flex-shrink-0 h-11 select-none">
-            {tabs.map((tab, idx) => {
-              const tabItemCount = tab.cart.reduce((s, i) => s + i.quantity, 0);
-              const isActive = tab.id === activeTabId;
-              const billLabel = `Bill ${idx + 1}`;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTabId(tab.id)}
-                  className={`group flex items-center gap-1.5 px-3.5 h-9 text-xs font-semibold whitespace-nowrap rounded-t-lg relative cursor-pointer transition-colors duration-100 border border-b-0 -mb-px outline-none ${
-                    isActive
-                      ? 'bg-white text-primary-700 border-surface-200 shadow-xs z-10 font-bold'
-                      : 'bg-transparent text-surface-500 border-transparent hover:text-surface-800 hover:bg-surface-200/60'
-                  }`}
-                >
-                  <span>{billLabel}</span>
-                  {tabItemCount > 0 && (
-                    <span
-                      className={`text-2xs px-1.5 py-0.5 rounded-full font-bold leading-none ${
-                        isActive
-                          ? 'bg-primary-100 text-primary-700'
-                          : 'bg-surface-300 text-surface-700'
-                      }`}
-                    >
-                      {tabItemCount}
-                    </span>
-                  )}
-                  {tabs.length > 1 && (
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCloseTab(tab.id);
-                      }}
-                      className="ml-0.5 p-0.5 rounded hover:bg-red-100 hover:text-red-600 text-surface-400 opacity-60 group-hover:opacity-100 transition-colors cursor-pointer"
-                      title={`Close ${billLabel}`}
-                    >
-                      <X className="w-3 h-3" />
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+        {/* Right Column: Active Cart Panel */}
+        <div className="w-[340px] md:w-[355px] lg:w-[370px] xl:w-[385px] 2xl:w-[400px] shrink-0 flex flex-col bg-white rounded-xl border border-surface-200 shadow-card overflow-hidden">
+          {/* ======== MULTI-TAB BAR (Sleek Segmented POS Tabs) ======== */}
+          <div className="flex items-center justify-between gap-1.5 px-3 py-2 bg-surface-100 border-b border-surface-200 shrink-0 select-none">
+            {/* Scrollable Tabs List - Completely Hidden Scrollbar with Mouse Wheel Support */}
+            <div
+              className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto no-scrollbar scroll-smooth"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+              onWheel={(e) => {
+                const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+                if (delta !== 0) {
+                  e.currentTarget.scrollLeft += delta;
+                }
+              }}
+            >
+              {tabs.map((tab, idx) => {
+                const tabItemCount = tab.cart.reduce((s, i) => s + i.quantity, 0);
+                const isActive = tab.id === activeTabId;
+                const billLabel = `Bill ${idx + 1}`;
+                return (
+                  <div
+                    key={tab.id}
+                    onClick={() => setActiveTabId(tab.id)}
+                    className={`group flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg cursor-pointer transition-all duration-150 shrink-0 border select-none ${
+                      isActive
+                        ? 'bg-primary-800 text-white border-primary-900 shadow-xs font-bold'
+                        : 'bg-surface-200/90 text-surface-800 border-surface-300 hover:bg-surface-300 hover:text-surface-950 font-semibold'
+                    }`}
+                  >
+                    <span>{billLabel}</span>
+                    {tabItemCount > 0 && (
+                      <span
+                        className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold leading-none ${
+                          isActive
+                            ? 'bg-white text-primary-900'
+                            : 'bg-surface-400 text-white'
+                        }`}
+                      >
+                        {tabItemCount}
+                      </span>
+                    )}
+                    {tabs.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCloseTab(tab.id);
+                        }}
+                        className={`p-0.5 rounded-full transition-colors ml-0.5 ${
+                          isActive
+                            ? 'hover:bg-primary-900 text-white/80 hover:text-white'
+                            : 'hover:bg-red-100 hover:text-red-700 text-surface-500'
+                        }`}
+                        title={`Close ${billLabel}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Pinned New Bill Tab (+) Button */}
             {tabs.length < MAX_TABS && (
               <button
                 type="button"
                 onClick={handleAddTab}
-                className="h-8 w-8 mb-1 flex items-center justify-center rounded-lg text-surface-400 hover:text-primary-600 hover:bg-surface-200/80 transition-colors ml-0.5 flex-shrink-0 cursor-pointer outline-none"
+                className="h-7 w-7 flex items-center justify-center rounded-lg bg-white border border-surface-300 text-surface-800 hover:text-primary-800 hover:border-primary-500 hover:bg-primary-50 transition-colors shrink-0 shadow-xs cursor-pointer outline-none"
                 title="Open a new bill tab (Ctrl+N)"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-4 h-4 font-bold" />
               </button>
             )}
           </div>
 
           {/* Cart Header */}
-          <div className="card-header bg-surface-50/50 py-3 px-4">
-            <div className="flex items-center gap-2.5">
-              <ShoppingCart className="w-5 h-5 text-primary-600 flex-shrink-0" />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-base font-bold text-surface-900">
+          <div className="bg-white border-b border-surface-200 py-2.5 px-3.5 flex items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-primary-100 border border-primary-300 flex items-center justify-center text-primary-900 shrink-0">
+                <Receipt className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-surface-900 truncate">
                     Bill {activeTabIndex + 1}
                   </span>
-                  <span className="badge badge-primary text-2xs font-semibold px-2 py-0.5">
+                  <span className="text-[10px] font-mono font-bold bg-primary-50 text-primary-950 border border-primary-300 px-1.5 py-0.2 rounded">
                     Draft #{activeTabIndex + 1}
                   </span>
                 </div>
-                <div className="text-[11px] text-surface-500 font-medium">
-                  Active POS Draft &bull; Next Bill: {String(nextBillNumber).padStart(5, '0')}
+                <div className="text-[10px] text-surface-600 font-mono font-bold">
+                  Next Bill: #{String(nextBillNumber).padStart(5, '0')}
                 </div>
               </div>
-              <span className="badge badge-info text-xs px-2.5 py-0.5 ml-auto">
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="badge badge-info text-2xs px-2 py-0.5 font-bold">
                 {calculations.itemCount} items
               </span>
+              {cart.length > 0 && (
+                <button
+                  onClick={handleClearCart}
+                  className="text-xs text-red-700 hover:text-red-900 hover:bg-red-50 px-2 py-1 rounded font-bold flex items-center gap-1 transition-colors cursor-pointer border border-transparent hover:border-red-200"
+                  title="Clear entire cart"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear</span>
+                </button>
+              )}
             </div>
-            {cart.length > 0 && (
-              <button
-                onClick={handleClearCart}
-                className="text-sm text-red-600 hover:text-red-700 font-semibold flex items-center gap-1 cursor-pointer"
-                title="Clear entire cart"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>Clear</span>
-              </button>
-            )}
           </div>
 
           {/* Cart Items List */}
@@ -1329,7 +1453,7 @@ export const BillingPage: React.FC = () => {
               className="btn-success w-full py-4 flex items-center justify-center gap-3 text-lg font-extrabold shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-2 tracking-wide"
             >
               <span>Collect Payment [F4]</span>
-              <span className="font-mono text-base bg-accent-700 px-3 py-1 rounded-md font-bold whitespace-nowrap tabular-nums">
+              <span className="font-mono text-base bg-emerald-800 text-white px-3 py-1 rounded-md font-bold whitespace-nowrap tabular-nums">
                 {formatCurrency(calculations.grandTotalPaise)}
               </span>
             </button>
@@ -1384,7 +1508,7 @@ export const BillingPage: React.FC = () => {
           <div className="grid grid-cols-2 gap-3">
             <div className="form-group">
               <label className="form-label text-sm font-semibold">
-                Price (₹) *
+                Price ({currencySymbol}) *
               </label>
               <input
                 type="number"
@@ -1583,7 +1707,7 @@ export const BillingPage: React.FC = () => {
                     : 'border-surface-200 hover:bg-surface-50 text-surface-700'
                 }`}
               >
-                <span className="font-black text-xs leading-none">₹+QR</span>
+                <span className="font-black text-xs leading-none">{currencySymbol}+QR</span>
                 <span className="text-sm font-bold">Cash + UPI</span>
               </button>
             </div>
@@ -1594,7 +1718,7 @@ export const BillingPage: React.FC = () => {
             <div className="p-4 rounded-xl bg-surface-50 border border-surface-200 space-y-3.5">
               <div className="form-group">
                 <label className="form-label text-sm font-semibold text-surface-800">
-                  Tendered Cash Amount (₹)
+                  Tendered Cash Amount ({currencySymbol})
                 </label>
                 <input
                   type="number"
@@ -1615,7 +1739,7 @@ export const BillingPage: React.FC = () => {
                     onClick={() => setTenderedCash(String(amt))}
                     className="btn-secondary text-sm font-mono font-bold py-2 px-3 cursor-pointer"
                   >
-                    ₹{amt}
+                    {currencySymbol}{amt}
                   </button>
                 ))}
               </div>
@@ -1649,7 +1773,7 @@ export const BillingPage: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div className="form-group">
                   <label className="form-label text-sm font-semibold text-surface-800 flex items-center justify-between">
-                    <span>UPI Amount (₹)</span>
+                    <span>UPI Amount ({currencySymbol})</span>
                     <span className="text-3xs text-primary-600 font-medium">Auto-Adjusts Cash</span>
                   </label>
                   <input
@@ -1674,7 +1798,7 @@ export const BillingPage: React.FC = () => {
                 </div>
                 <div className="form-group">
                   <label className="form-label text-sm font-semibold text-surface-800 flex items-center justify-between">
-                    <span>Cash Amount (₹)</span>
+                    <span>Cash Amount ({currencySymbol})</span>
                     <span className="text-3xs text-primary-600 font-medium">Auto-Adjusts UPI</span>
                   </label>
                   <input

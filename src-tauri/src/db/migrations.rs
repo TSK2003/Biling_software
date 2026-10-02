@@ -365,7 +365,7 @@ fn apply_v1(db: &mut Database) -> Result<(), Box<dyn std::error::Error>> {
         ("printer_default", ""),
         ("gdrive_connected", "false"),
         ("gdrive_folder_name", "Shop Billing"),
-        ("auto_backup_enabled", "true"),
+        ("auto_backup_enabled", "false"),
         ("auto_backup_max_count", "10"),
         ("app_version", "0.1.0"),
         ("report_schema_version", "1"),

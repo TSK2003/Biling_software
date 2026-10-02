@@ -539,10 +539,10 @@ function compressImageFile(file: File, maxDim = 400, quality = 0.8): Promise<str
                           {p.is_restockable && (
                             <button
                               onClick={() => handleOpenRestock(p)}
-                              className="btn-sm flex items-center gap-1 text-xs py-1 px-2 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-colors font-medium"
+                              className="btn-table-activate"
                               title="Restock units and record expense"
                             >
-                              <Package className="w-3.5 h-3.5 text-emerald-600" />
+                              <Package className="w-3.5 h-3.5" />
                               <span>Restock</span>
                             </button>
                           )}
@@ -550,21 +550,17 @@ function compressImageFile(file: File, maxDim = 400, quality = 0.8): Promise<str
                           {/* 1. Edit Button */}
                           <button
                             onClick={() => handleOpenEdit(p)}
-                            className="btn-secondary btn-sm flex items-center gap-1 text-xs py-1 px-2 text-primary-700 hover:bg-primary-50"
+                            className="btn-table-edit"
                             title="Edit product details & image"
                           >
-                            <Edit2 className="w-3.5 h-3.5 text-primary-600" />
+                            <Edit2 className="w-3.5 h-3.5 text-blue-700" />
                             <span>Edit</span>
                           </button>
 
                           {/* 2. Activate / Deactivate Toggle Button */}
                           <button
                             onClick={() => handleToggleActive(p)}
-                            className={`btn-sm flex items-center gap-1 text-xs py-1 px-2 rounded border transition-colors ${
-                              p.is_active
-                                ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                                : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                            }`}
+                            className={p.is_active ? 'btn-table-deactivate' : 'btn-table-activate'}
                             title={p.is_active ? 'Deactivate this product' : 'Activate this product'}
                           >
                             <Power className="w-3.5 h-3.5" />
@@ -574,10 +570,10 @@ function compressImageFile(file: File, maxDim = 400, quality = 0.8): Promise<str
                           {/* 3. Delete Button */}
                           <button
                             onClick={() => setDeletingProduct(p)}
-                            className="btn-sm flex items-center gap-1 text-xs py-1 px-2 rounded border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors"
+                            className="btn-table-delete"
                             title="Delete product"
                           >
-                            <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                            <Trash2 className="w-3.5 h-3.5 text-red-700" />
                             <span>Delete</span>
                           </button>
                         </div>

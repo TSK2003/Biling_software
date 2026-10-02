@@ -489,16 +489,16 @@ pub fn sync_to_gdrive(state: State<'_, AppState>, folder_id: Option<String>) -> 
 }
 
 #[tauri::command]
-pub fn check_daily_backup(state: State<'_, AppState>) -> Result<Option<BackupRecord>, String> {
-    let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
-    BackupService::run_daily_auto_backup_if_needed(&db)
+pub fn check_daily_backup(_state: State<'_, AppState>) -> Result<Option<BackupRecord>, String> {
+    // Automatic backup is disabled per user preference
+    Ok(None)
 }
 
 #[tauri::command]
 pub fn trigger_daily_backup_now(state: State<'_, AppState>) -> Result<BackupRecord, String> {
     crate::commands::auth::require_screen_access("backup")?;
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
-    let record = BackupService::create_full_backup(&db, "daily_auto")?;
+    let record = BackupService::create_full_backup(&db, "manual")?;
     Ok(record)
 }
 

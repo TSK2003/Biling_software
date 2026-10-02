@@ -15,13 +15,11 @@ import {
   Key,
   CheckCircle2,
   HardDrive,
-  ToggleLeft,
-  ToggleRight,
 } from 'lucide-react';
 import { api } from '../../lib/ipc';
 import { formatDateTime } from '../../lib/format';
 import { Modal } from '../../components/Modal';
-import type { BackupManifest, BackupRecord, AutoBackupStatus } from '../../types';
+import type { BackupManifest, BackupRecord } from '../../types';
 import toast from 'react-hot-toast';
 
 function formatBytes(bytes: number): string {
@@ -37,10 +35,8 @@ export const BackupPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [backupFolderPath, setBackupFolderPath] = useState<string>('');
 
-  // Daily Automatic Backup State
-  const [autoBackupStatus, setAutoBackupStatus] = useState<AutoBackupStatus | null>(null);
+  // Manual Backup State
   const [isRunningDailyBackup, setIsRunningDailyBackup] = useState(false);
-  const [isTogglingAuto, setIsTogglingAuto] = useState(false);
 
   // Manual Path Input State
   const [manualPathInput, setManualPathInput] = useState('');
@@ -68,18 +64,6 @@ export const BackupPage: React.FC = () => {
     }
   };
 
-  const loadAutoStatus = async () => {
-    try {
-      const st = await api.getAutoBackupStatus();
-      setAutoBackupStatus(st);
-      if (st?.folder_path) {
-        setBackupFolderPath(st.folder_path);
-      }
-    } catch {
-      // Ignore
-    }
-  };
-
   const loadBackupFolder = async () => {
     try {
       const folder = await api.getBackupFolder();
@@ -93,7 +77,6 @@ export const BackupPage: React.FC = () => {
 
   useEffect(() => {
     loadBackups();
-    loadAutoStatus();
     loadBackupFolder();
   }, []);
 
@@ -104,7 +87,7 @@ export const BackupPage: React.FC = () => {
         await api.setBackupFolder(selected);
         setBackupFolderPath(selected);
         toast.success(`Backup folder updated to: ${selected}`);
-        await Promise.all([loadBackups(), loadAutoStatus()]);
+        await Promise.all([loadBackups(), loadBackupFolder()]);
       }
     } catch (err: any) {
       toast.error(typeof err === 'string' ? err : 'Failed to choose backup folder');
@@ -143,34 +126,19 @@ export const BackupPage: React.FC = () => {
 
   const handleTriggerDailyBackup = async () => {
     setIsRunningDailyBackup(true);
-    const toastId = toast.loading('Creating daily automatic backup package...');
+    const toastId = toast.loading('Creating database backup package...');
     try {
       const res = await api.triggerDailyBackupNow();
-      toast.success(`Daily backup created successfully! Saved to: ${res.backup_path}`, {
+      toast.success(`Backup created successfully! Saved to: ${res.backup_path}`, {
         id: toastId,
         duration: 5000,
       });
-      await Promise.all([loadBackups(), loadAutoStatus()]);
+      await Promise.all([loadBackups(), loadBackupFolder()]);
     } catch (err: any) {
-      const errMsg = typeof err === 'string' ? err : (err?.message || 'Failed to create daily backup');
+      const errMsg = typeof err === 'string' ? err : (err?.message || 'Failed to create backup');
       toast.error(errMsg, { id: toastId });
     } finally {
       setIsRunningDailyBackup(false);
-    }
-  };
-
-  const handleToggleAutoBackup = async () => {
-    if (!autoBackupStatus) return;
-    setIsTogglingAuto(true);
-    try {
-      const nextState = !autoBackupStatus.enabled;
-      await api.setAutoBackupEnabled(nextState);
-      toast.success(nextState ? 'Automatic daily backup enabled' : 'Automatic daily backup disabled');
-      await loadAutoStatus();
-    } catch {
-      toast.error('Failed to change auto-backup setting');
-    } finally {
-      setIsTogglingAuto(false);
     }
   };
 
@@ -248,79 +216,48 @@ export const BackupPage: React.FC = () => {
     }
   };
 
+  const latestBackup = backups && backups.length > 0 ? backups[0] : null;
+
   return (
     <div className="space-y-5">
-      {/* Unified Automatic Backup & Disaster Recovery Card */}
-      <div className="card p-4 bg-white border border-surface-200 shadow-sm rounded-lg space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-primary-50 text-primary-700 flex items-center justify-center flex-shrink-0">
-              <RefreshCw className="w-5 h-5 text-primary-600" />
+      {/* Manual Database Backup & Recovery Card */}
+      <div className="card p-5 bg-white border border-surface-200 shadow-sm rounded-lg space-y-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-primary-50 text-primary-700 flex items-center justify-center flex-shrink-0 border border-primary-200">
+              <Database className="w-5 h-5 text-primary-600" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-surface-900">
-                  Automatic Backup & Disaster Recovery
+                  Database Backup & Disaster Recovery
                 </h3>
-                {autoBackupStatus?.enabled ? (
-                  <span className="badge badge-success text-3xs font-bold flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Auto-Sync Active</span>
-                  </span>
-                ) : (
-                  <span className="badge badge-danger text-3xs font-bold">
-                    Auto-Sync Paused
-                  </span>
-                )}
-                {autoBackupStatus?.last_date === new Date().toISOString().slice(0, 10) ? (
-                  <span className="badge badge-primary text-3xs font-semibold">
-                    Today Secured ({autoBackupStatus.last_date})
-                  </span>
-                ) : (
-                  <span className="badge badge-warning text-3xs font-semibold">
-                    Today Pending
-                  </span>
-                )}
+                <span className="badge badge-neutral text-3xs font-bold">
+                  Manual On-Demand
+                </span>
               </div>
               <p className="text-xs text-surface-500 mt-0.5">
-                Consolidated monthly backup with automatic daily append for sales, expenses, and GST.
+                Create an on-demand, encrypted <code className="text-3xs bg-surface-100 px-1 py-0.5 rounded font-mono text-surface-800">.billingbackup</code> archive of your bills, inventory, expenses, and system settings.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
-            <button
-              type="button"
-              onClick={handleToggleAutoBackup}
-              disabled={isTogglingAuto}
-              className={`btn-secondary text-xs flex items-center gap-1.5 py-1.5 px-3 font-semibold rounded-md ${
-                autoBackupStatus?.enabled ? 'text-primary-700 border-primary-300' : 'text-surface-600'
-              }`}
-              title="Toggle automatic daily backups"
-            >
-              {autoBackupStatus?.enabled ? (
-                <ToggleRight className="w-4 h-4 text-primary-600" />
-              ) : (
-                <ToggleLeft className="w-4 h-4 text-surface-400" />
-              )}
-              <span>{autoBackupStatus?.enabled ? 'Auto-Backup: On' : 'Auto-Backup: Off'}</span>
-            </button>
-
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
               type="button"
               onClick={handleTriggerDailyBackup}
               disabled={isRunningDailyBackup}
-              className="btn-primary text-xs flex items-center gap-1.5 py-1.5 px-3 font-bold rounded-md shadow-xs cursor-pointer"
-              title="Trigger today's backup snapshot immediately"
+              className="btn-primary text-xs flex items-center gap-2 py-2 px-4 font-bold rounded-lg shadow-sm cursor-pointer hover:bg-primary-700 transition-all"
+              title="Create an on-demand database backup package now"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRunningDailyBackup ? 'animate-spin' : ''}`} />
-              <span>{isRunningDailyBackup ? 'Backing Up...' : 'Backup Now'}</span>
+              <Database className={`w-4 h-4 ${isRunningDailyBackup ? 'animate-spin' : ''}`} />
+              <span>{isRunningDailyBackup ? 'Creating Backup...' : 'Backup Database Now'}</span>
             </button>
           </div>
         </div>
 
         {/* Dedicated Backup Folder Selector Row */}
-        <div className="p-3 rounded-md bg-surface-50 border border-surface-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="p-3.5 rounded-lg bg-surface-50 border border-surface-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
             <FolderOpen className="w-4 h-4 text-primary-600 flex-shrink-0" />
             <div className="min-w-0">
@@ -370,22 +307,20 @@ export const BackupPage: React.FC = () => {
         </div>
 
         {/* Snapshot Summary Strip */}
-        {autoBackupStatus && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 text-2xs">
-            <div className="bg-surface-50 p-2.5 rounded-md border border-surface-200">
-              <span className="text-surface-500 block font-medium">Last Recorded Backup:</span>
-              <span className="font-semibold text-surface-800 block mt-0.5">
-                {autoBackupStatus.last_date ? `${autoBackupStatus.last_date} ${autoBackupStatus.last_time ? `(${autoBackupStatus.last_time})` : ''}` : 'No backup recorded yet'}
-              </span>
-            </div>
-            <div className="bg-surface-50 p-2.5 rounded-md border border-surface-200">
-              <span className="text-surface-500 block font-medium">Snapshots Available:</span>
-              <span className="font-bold text-surface-800 block mt-0.5">
-                {autoBackupStatus.total_backups} monthly archive & ledger files
-              </span>
-            </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 text-2xs">
+          <div className="bg-surface-50 p-2.5 rounded-md border border-surface-200">
+            <span className="text-surface-500 block font-medium">Last Recorded Backup:</span>
+            <span className="font-semibold text-surface-800 block mt-0.5">
+              {latestBackup ? formatDateTime(latestBackup.created_at) : 'No backup created yet'}
+            </span>
           </div>
-        )}
+          <div className="bg-surface-50 p-2.5 rounded-md border border-surface-200">
+            <span className="text-surface-500 block font-medium">Available Backups:</span>
+            <span className="font-bold text-surface-800 block mt-0.5">
+              {backups.length} local backup archive{backups.length === 1 ? '' : 's'}
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Restore from Local Backup Card */}

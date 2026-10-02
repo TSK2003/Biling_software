@@ -265,6 +265,17 @@ pub fn create_expense(
     ).map_err(|e| format!("Failed to record expense: {}", e))?;
 
     let expense_id = tx.last_insert_rowid();
+
+    let _ = tx.execute(
+        "INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json)
+         VALUES (?1, 'create', 'expense', ?2, ?3)",
+        params![
+            current_user.id,
+            expense_id,
+            format!("{{\"title\":\"{}\",\"amount\":{},\"expense_number\":{}}}", request.title.trim().replace('"', "\\\""), request.amount_paise, next_number)
+        ],
+    );
+
     tx.commit().map_err(|e| format!("Commit error: {}", e))?;
 
     get_expense_detail_internal(&db.conn, expense_id)
@@ -328,6 +339,12 @@ pub fn update_expense(
         "UPDATE expenses SET updated_by = ?1, updated_at = datetime('now') WHERE id = ?2",
         params![current_user.id, request.id],
     ).map_err(|e| e.to_string())?;
+
+    let _ = db.conn.execute(
+        "INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json)
+         VALUES (?1, 'update', 'expense', ?2, ?3)",
+        params![current_user.id, request.id, format!("{{\"id\":{}}}", request.id)],
+    );
 
     get_expense_detail_internal(&db.conn, request.id)
 }
@@ -407,6 +424,12 @@ pub fn cancel_expense(
          WHERE id = ?4",
         params![reason, current_user.id, chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(), id],
     ).map_err(|e| format!("Failed to cancel expense: {}", e))?;
+
+    let _ = db.conn.execute(
+        "INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json)
+         VALUES (?1, 'cancel', 'expense', ?2, ?3)",
+        params![current_user.id, id, format!("{{\"expense_number\":{},\"reason\":\"{}\"}}", exp_number, reason.replace('"', "\\\""))],
+    );
 
     // If it's a stock purchase, reduce the product's inventory!
     if let (Some(pid), Some(revert_qty)) = (target_product_id, stock_qty_to_revert) {

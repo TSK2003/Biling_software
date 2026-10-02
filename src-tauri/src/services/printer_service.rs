@@ -360,21 +360,23 @@ impl PrinterService {
         // 4. Header: Shop Name (Center + Double Height/Width + Bold)
         // Center alignment: ESC a 1 (0x1B 0x61 0x01)
         buf.extend_from_slice(&[0x1B, 0x61, 0x01]);
-        // Bold ON: ESC E 1 (0x1B 0x45 0x01)
-        buf.extend_from_slice(&[0x1B, 0x45, 0x01]);
-        if paper_size == "Thermal80" || paper_size == "A4" || paper_size == "Thermal100" || paper_size == "Letter" || paper_size == "Continuous3Inch" {
-            // Double width & height: GS ! 0x11
-            buf.extend_from_slice(&[0x1D, 0x21, 0x11]);
-        } else {
-            // Double height: GS ! 0x01
-            buf.extend_from_slice(&[0x1D, 0x21, 0x01]);
-        }
-        let shop_name_upper = shop_name.to_uppercase();
-        buf.extend_from_slice(shop_name_upper.as_bytes());
-        buf.push(b'\n');
+        if !shop_name.trim().is_empty() {
+            // Bold ON: ESC E 1 (0x1B 0x45 0x01)
+            buf.extend_from_slice(&[0x1B, 0x45, 0x01]);
+            if paper_size == "Thermal80" || paper_size == "A4" || paper_size == "Thermal100" || paper_size == "Letter" || paper_size == "Continuous3Inch" {
+                // Double width & height: GS ! 0x11
+                buf.extend_from_slice(&[0x1D, 0x21, 0x11]);
+            } else {
+                // Double height: GS ! 0x01
+                buf.extend_from_slice(&[0x1D, 0x21, 0x01]);
+            }
+            let shop_name_upper = shop_name.to_uppercase();
+            buf.extend_from_slice(shop_name_upper.as_bytes());
+            buf.push(b'\n');
 
-        // Reset text size & bold: GS ! 0x00, ESC E 0
-        buf.extend_from_slice(&[0x1D, 0x21, 0x00, 0x1B, 0x45, 0x00]);
+            // Reset text size & bold: GS ! 0x00, ESC E 0
+            buf.extend_from_slice(&[0x1D, 0x21, 0x00, 0x1B, 0x45, 0x00]);
+        }
 
         // Shop Address
         if !shop_address.trim().is_empty() {
@@ -569,17 +571,15 @@ impl PrinterService {
         buf.extend_from_slice(&[0x1B, 0x61, 0x01]);
 
         let footer_custom = receipt_footer.trim();
-        let footer_heading = if footer_custom.is_empty() {
-            "THANK YOU! VISIT AGAIN".to_string()
-        } else {
-            footer_custom.to_uppercase()
-        };
+        if !footer_custom.is_empty() {
+            let footer_heading = footer_custom.to_uppercase();
 
-        // Bold ON for footer heading
-        buf.extend_from_slice(&[0x1B, 0x45, 0x01]);
-        buf.extend_from_slice(footer_heading.as_bytes());
-        buf.push(b'\n');
-        buf.extend_from_slice(&[0x1B, 0x45, 0x00]);
+            // Bold ON for footer heading
+            buf.extend_from_slice(&[0x1B, 0x45, 0x01]);
+            buf.extend_from_slice(footer_heading.as_bytes());
+            buf.push(b'\n');
+            buf.extend_from_slice(&[0x1B, 0x45, 0x00]);
+        }
 
         // Feed paper (4 lines) to clear the cutter
         buf.extend_from_slice(b"\n\n\n\n");

@@ -14,31 +14,66 @@ import {
 import { api } from '../../lib/ipc';
 import { formatCurrency, getTodayDateString, formatDateDMY, formatPaymentMethod } from '../../lib/format';
 import { Header } from '../../components/Header';
+import { useSettings } from '../../contexts/SettingsContext';
 import type { DashboardStats, Bill } from '../../types';
 import toast from 'react-hot-toast';
 
 export const DashboardPage: React.FC = () => {
+  const { currencySymbol } = useSettings();
   const todayStr = getTodayDateString();
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState(todayStr);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentBills, setRecentBills] = useState<Bill[]>([]);
+  const [totalBillsCount, setTotalBillsCount] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Compute normalized working date range (guarantees from <= to)
+  const effectiveFrom = dateFrom && dateTo ? (dateFrom <= dateTo ? dateFrom : dateTo) : (dateFrom || dateTo || todayStr);
+  const effectiveTo = dateFrom && dateTo ? (dateFrom <= dateTo ? dateTo : dateFrom) : (dateTo || dateFrom || todayStr);
 
   const loadDashboardData = async () => {
     setIsLoading(true);
     try {
-      const [s, recent] = await Promise.all([
-        api.getDashboardStats(dateFrom, dateTo).catch(() => null),
-        api.getRecentBills(8).catch(() => []),
+      const [s, billsRes] = await Promise.all([
+        api.getDashboardStats(effectiveFrom, effectiveTo).catch(() => null),
+        api.getBills({ dateFrom: effectiveFrom, dateTo: effectiveTo, pageSize: 8 }).catch(() => null),
       ]);
-      setStats(s || { total_sales_paise: 0, total_bills: 0, total_items_sold: 0, cash_sales_paise: 0, upi_sales_paise: 0, card_sales_paise: 0, total_discount_paise: 0, total_gst_paise: 0, avg_bill_paise: 0, total_expenses_paise: 0, net_income_paise: 0 });
-      setRecentBills(recent || []);
+      setStats(
+        s || {
+          total_sales_paise: 0,
+          total_bills: 0,
+          total_items_sold: 0,
+          cash_sales_paise: 0,
+          upi_sales_paise: 0,
+          card_sales_paise: 0,
+          total_discount_paise: 0,
+          total_gst_paise: 0,
+          avg_bill_paise: 0,
+          total_expenses_paise: 0,
+          net_income_paise: 0,
+        }
+      );
+      setRecentBills(billsRes?.data || []);
+      setTotalBillsCount(billsRes?.total || 0);
     } catch (err) {
       console.error(err);
       toast.error('Failed to load dashboard metrics');
-      setStats({ total_sales_paise: 0, total_bills: 0, total_items_sold: 0, cash_sales_paise: 0, upi_sales_paise: 0, card_sales_paise: 0, total_discount_paise: 0, total_gst_paise: 0, avg_bill_paise: 0, total_expenses_paise: 0, net_income_paise: 0 });
+      setStats({
+        total_sales_paise: 0,
+        total_bills: 0,
+        total_items_sold: 0,
+        cash_sales_paise: 0,
+        upi_sales_paise: 0,
+        card_sales_paise: 0,
+        total_discount_paise: 0,
+        total_gst_paise: 0,
+        avg_bill_paise: 0,
+        total_expenses_paise: 0,
+        net_income_paise: 0,
+      });
       setRecentBills([]);
+      setTotalBillsCount(0);
     } finally {
       setIsLoading(false);
     }
@@ -46,7 +81,7 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     loadDashboardData();
-  }, [dateFrom, dateTo]);
+  }, [effectiveFrom, effectiveTo]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-surface-50">
@@ -55,68 +90,6 @@ export const DashboardPage: React.FC = () => {
         subtitle="Live sales performance, payment channels, and transaction volume"
         actions={
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Quick Preset Range Selector */}
-            <div className="flex items-center bg-surface-100 p-0.5 rounded-lg border border-surface-200">
-              <button
-                type="button"
-                onClick={() => {
-                  setDateFrom(todayStr);
-                  setDateTo(todayStr);
-                }}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
-                  dateFrom === todayStr && dateTo === todayStr
-                    ? 'bg-white text-primary-700 shadow-xs'
-                    : 'text-surface-600 hover:text-surface-900'
-                }`}
-              >
-                Today
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const now = new Date();
-                  const startOfWeek = new Date(now);
-                  const day = startOfWeek.getDay();
-                  const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
-                  startOfWeek.setDate(diff);
-                  const fStr = `${startOfWeek.getFullYear()}-${String(startOfWeek.getMonth() + 1).padStart(2, '0')}-${String(startOfWeek.getDate()).padStart(2, '0')}`;
-                  setDateFrom(fStr);
-                  setDateTo(todayStr);
-                }}
-                className="px-2.5 py-1 text-xs font-semibold rounded-md transition-colors text-surface-600 hover:text-surface-900"
-              >
-                This Week
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const monthStart = `${todayStr.slice(0, 7)}-01`;
-                  setDateFrom(monthStart);
-                  setDateTo(todayStr);
-                }}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
-                  dateFrom === `${todayStr.slice(0, 7)}-01` && dateTo === todayStr
-                    ? 'bg-white text-primary-700 shadow-xs'
-                    : 'text-surface-600 hover:text-surface-900'
-                }`}
-              >
-                This Month
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDateFrom('2020-01-01');
-                  setDateTo(todayStr);
-                }}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${
-                  dateFrom === '2020-01-01'
-                    ? 'bg-white text-primary-700 shadow-xs'
-                    : 'text-surface-600 hover:text-surface-900'
-                }`}
-              >
-                All Time
-              </button>
-            </div>
 
             {/* Custom From - To Range Filter */}
             <div className="flex items-center gap-1.5 bg-white px-3 py-1 rounded-lg border border-surface-200 shadow-xs h-9">
@@ -126,14 +99,9 @@ export const DashboardPage: React.FC = () => {
                 <input
                   type="date"
                   value={dateFrom}
-                  max={todayStr}
-                  onChange={(e) => {
-                    const newFrom = e.target.value;
-                    setDateFrom(newFrom);
-                    if (newFrom > dateTo) setDateTo(newFrom);
-                  }}
+                  onChange={(e) => setDateFrom(e.target.value)}
                   className="bg-transparent border-0 text-xs font-mono font-semibold text-surface-800 p-0 focus:ring-0 cursor-pointer"
-                  title="From Date (up to today)"
+                  title="Working From Date"
                 />
               </div>
 
@@ -144,14 +112,26 @@ export const DashboardPage: React.FC = () => {
                 <input
                   type="date"
                   value={dateTo}
-                  min={dateFrom}
-                  max={todayStr}
                   onChange={(e) => setDateTo(e.target.value)}
                   className="bg-transparent border-0 text-xs font-mono font-semibold text-surface-800 p-0 focus:ring-0 cursor-pointer"
-                  title="To Date (up to today)"
+                  title="Working To Date"
                 />
               </div>
             </div>
+
+            {(dateFrom !== todayStr || dateTo !== todayStr) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom(todayStr);
+                  setDateTo(todayStr);
+                }}
+                className="h-9 px-3 text-xs font-semibold text-surface-600 hover:text-primary-600 bg-white hover:bg-surface-50 rounded-lg border border-surface-200 flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                title="Reset to today"
+              >
+                <span>Reset to Today</span>
+              </button>
+            )}
           </div>
         }
       />
@@ -160,68 +140,68 @@ export const DashboardPage: React.FC = () => {
         {/* Metric Cards Grid - Balanced, High-Contrast Premium Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Total Revenue Card */}
-          <div className="card p-4 border-t-4 border-primary-600 shadow-xs hover:shadow-md transition-shadow">
+          <div className="card p-4 border-t-4 border-primary-800 shadow-xs hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
-              <span className="text-2xs uppercase tracking-wider font-bold text-surface-500">Total Revenue</span>
-              <div className="w-8 h-8 rounded-lg bg-primary-50 text-primary-700 flex items-center justify-center font-bold text-sm">
-                ₹
+              <span className="text-xs uppercase tracking-wider font-bold text-surface-600">Total Revenue</span>
+              <div className="w-8 h-8 rounded-lg bg-primary-100 border border-primary-300 text-primary-950 flex items-center justify-center font-bold text-sm shadow-2xs">
+                {currencySymbol}
               </div>
             </div>
             <div className="text-2xl font-black font-mono text-surface-950 mt-2">
               {formatCurrency(stats?.total_sales_paise || 0)}
             </div>
-            <div className="text-xs text-surface-500 font-medium mt-1 flex items-center justify-between">
+            <div className="text-xs text-surface-600 font-medium mt-1 flex items-center justify-between">
               <span>Average Order:</span>
-              <span className="font-mono font-bold text-surface-700">{formatCurrency(stats?.avg_bill_paise || 0)}</span>
+              <span className="font-mono font-bold text-surface-900">{formatCurrency(stats?.avg_bill_paise || 0)}</span>
             </div>
           </div>
 
           {/* Orders / Bills Count Card */}
-          <div className="card p-4 border-t-4 border-indigo-600 shadow-xs hover:shadow-md transition-shadow">
+          <div className="card p-4 border-t-4 border-indigo-800 shadow-xs hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
-              <span className="text-2xs uppercase tracking-wider font-bold text-surface-500">Orders / Bills</span>
-              <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center">
+              <span className="text-xs uppercase tracking-wider font-bold text-surface-600">Orders / Bills</span>
+              <div className="w-8 h-8 rounded-lg bg-indigo-100 border border-indigo-300 text-indigo-950 flex items-center justify-center shadow-2xs">
                 <Receipt className="w-4 h-4" />
               </div>
             </div>
             <div className="text-2xl font-black font-mono text-surface-950 mt-2">
               {stats?.total_bills || 0}
             </div>
-            <div className="text-xs text-surface-500 font-medium mt-1">
+            <div className="text-xs text-surface-600 font-medium mt-1">
               Completed transactions
             </div>
           </div>
 
           {/* Total Items Sold Card */}
-          <div className="card p-4 border-t-4 border-emerald-600 shadow-xs hover:shadow-md transition-shadow">
+          <div className="card p-4 border-t-4 border-emerald-800 shadow-xs hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
-              <span className="text-2xs uppercase tracking-wider font-bold text-surface-500">Items Sold</span>
-              <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
+              <span className="text-xs uppercase tracking-wider font-bold text-surface-600">Items Sold</span>
+              <div className="w-8 h-8 rounded-lg bg-emerald-100 border border-emerald-300 text-emerald-950 flex items-center justify-center shadow-2xs">
                 <ShoppingBag className="w-4 h-4" />
               </div>
             </div>
             <div className="text-2xl font-black font-mono text-surface-950 mt-2">
               {stats?.total_items_sold || 0}
             </div>
-            <div className="text-xs text-surface-500 font-medium mt-1">
+            <div className="text-xs text-surface-600 font-medium mt-1">
               Total units billed
             </div>
           </div>
 
           {/* Discounts / GST Card */}
-          <div className="card p-4 border-t-4 border-amber-600 shadow-xs hover:shadow-md transition-shadow">
+          <div className="card p-4 border-t-4 border-amber-800 shadow-xs hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
-              <span className="text-2xs uppercase tracking-wider font-bold text-surface-500">Total Discounts</span>
-              <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center">
+              <span className="text-xs uppercase tracking-wider font-bold text-surface-600">Total Discounts</span>
+              <div className="w-8 h-8 rounded-lg bg-amber-100 border border-amber-300 text-amber-950 flex items-center justify-center shadow-2xs">
                 <ArrowUpRight className="w-4 h-4" />
               </div>
             </div>
-            <div className="text-2xl font-black font-mono text-amber-800 mt-2">
+            <div className="text-2xl font-black font-mono text-amber-950 mt-2">
               {formatCurrency(stats?.total_discount_paise || 0)}
             </div>
-            <div className="text-xs text-surface-500 font-medium mt-1 flex items-center justify-between">
+            <div className="text-xs text-surface-600 font-medium mt-1 flex items-center justify-between">
               <span>GST Tax:</span>
-              <span className="font-mono font-bold text-surface-700">{formatCurrency(stats?.total_gst_paise || 0)}</span>
+              <span className="font-mono font-bold text-surface-900">{formatCurrency(stats?.total_gst_paise || 0)}</span>
             </div>
           </div>
         </div>
@@ -310,12 +290,19 @@ export const DashboardPage: React.FC = () => {
 
         {/* Recent Transactions Table */}
         <div className="card overflow-hidden">
-          <div className="card-header bg-surface-50/70 py-3 px-5 border-b border-surface-200 flex items-center justify-between">
-            <div className="text-xs font-black text-surface-900 uppercase tracking-wider">
-              Recent Completed Bills
+          <div className="card-header bg-surface-50/70 py-3 px-5 border-b border-surface-200 flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <div className="text-xs font-black text-surface-900 uppercase tracking-wider">
+                Completed Bills for Selected Period
+              </div>
+              <span className="text-2xs font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded border border-primary-200 font-mono">
+                {effectiveFrom === effectiveTo
+                  ? formatDateDMY(effectiveFrom)
+                  : `${formatDateDMY(effectiveFrom)} → ${formatDateDMY(effectiveTo)}`}
+              </span>
             </div>
             <span className="text-2xs font-semibold text-surface-500 font-mono">
-              Showing latest {recentBills.length} transactions
+              Showing {recentBills.length} of {totalBillsCount} transactions
             </span>
           </div>
           <div className="table-container">
@@ -341,7 +328,11 @@ export const DashboardPage: React.FC = () => {
                 ) : recentBills.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-8 text-surface-500 text-sm font-medium">
-                      No sales transactions recorded in this period.
+                      No sales transactions recorded for{' '}
+                      {effectiveFrom === effectiveTo
+                        ? formatDateDMY(effectiveFrom)
+                        : `${formatDateDMY(effectiveFrom)} to ${formatDateDMY(effectiveTo)}`}
+                      .
                     </td>
                   </tr>
                 ) : (

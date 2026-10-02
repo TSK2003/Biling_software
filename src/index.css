@@ -20,6 +20,21 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  :root {
+    --color-primary-50: 239 246 255;
+    --color-primary-100: 219 234 254;
+    --color-primary-200: 191 219 254;
+    --color-primary-300: 147 197 253;
+    --color-primary-400: 59 130 246;
+    --color-primary-500: 29 78 216;
+    --color-primary-600: 30 64 175;
+    --color-primary-700: 30 58 138;
+    --color-primary-800: 23 37 84;
+    --color-primary-900: 15 23 42;
+    --color-primary-950: 2 6 23;
+    --currency-symbol: '₹';
+  }
+
   body {
     background-color: #f8fafc;
     color: #1e293b;
@@ -41,6 +56,16 @@
     height: 0 !important;
   }
 
+  /* Date picker clean calendar indicator */
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.6;
+    margin-left: 2px;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 0.95;
+  }
+
   /* Scrollbar styling */
   ::-webkit-scrollbar {
     width: 6px;
@@ -58,6 +83,19 @@
 
   ::-webkit-scrollbar-thumb:hover {
     background: #94a3b8;
+  }
+
+  /* Utility to suppress scrollbars on tabs and chips */
+  .no-scrollbar::-webkit-scrollbar,
+  .no-scrollbar *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    background: transparent !important;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
   }
 
   /* Input styling */
@@ -87,12 +125,16 @@
   }
 
   .sidebar-item {
-    @apply flex items-center gap-3 px-4 py-2.5 mx-2 rounded text-base text-surface-600 
-           hover:bg-surface-50 hover:text-surface-900 cursor-pointer transition-colors duration-150;
+    @apply flex items-center gap-3 px-4 py-2.5 mx-2 rounded-lg text-sm text-surface-600 
+           hover:bg-surface-100 hover:text-surface-900 cursor-pointer transition-colors duration-150 font-medium;
   }
 
   .sidebar-item.active {
-    @apply bg-primary-50 text-primary-700 font-semibold;
+    @apply bg-primary-800 text-white font-bold shadow-sm;
+  }
+
+  .sidebar-item.active svg {
+    @apply text-white;
   }
 
   .sidebar-item svg {
@@ -118,7 +160,7 @@
   }
 
   .stat-card-label {
-    @apply text-xs font-bold text-surface-500 uppercase tracking-wider;
+    @apply text-xs font-bold text-surface-600 uppercase tracking-wider;
   }
 
   .stat-card-value {
@@ -133,23 +175,37 @@
   }
 
   .btn-primary {
-    @apply btn h-9 px-3.5 bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white 
-           focus:ring-primary-500 shadow-sm;
+    @apply btn h-9 px-3.5 bg-primary-700 hover:bg-primary-800 active:bg-primary-900 text-white 
+           focus:ring-primary-600 shadow-sm font-semibold border border-primary-800;
   }
 
   .btn-secondary {
-    @apply btn h-9 px-3.5 bg-white hover:bg-surface-50 active:bg-surface-100 text-surface-700 
-           border border-surface-300 focus:ring-surface-400 shadow-sm;
+    @apply btn h-9 px-3.5 bg-white hover:bg-surface-50 active:bg-surface-100 text-surface-800 
+           border border-surface-300 focus:ring-surface-400 shadow-sm font-semibold;
   }
 
   .btn-danger {
-    @apply btn h-9 px-3.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white 
-           focus:ring-red-500 shadow-sm;
+    @apply btn h-9 px-3.5 bg-red-700 hover:bg-red-800 active:bg-red-900 text-white 
+           focus:ring-red-600 shadow-sm font-semibold border border-red-800;
   }
 
   .btn-success {
-    @apply btn h-9 px-3.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white 
-           focus:ring-emerald-500 shadow-sm;
+    @apply btn h-9 px-3.5 bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white 
+           focus:ring-emerald-600 shadow-sm font-semibold border border-emerald-800;
+  }
+
+  /* Standard Table Action Buttons */
+  .btn-table-edit {
+    @apply inline-flex items-center gap-1 text-xs font-bold py-1 px-2.5 rounded-md border border-blue-300 bg-blue-50 text-blue-900 hover:bg-blue-800 hover:text-white transition-colors cursor-pointer shadow-2xs;
+  }
+  .btn-table-deactivate {
+    @apply inline-flex items-center gap-1 text-xs font-bold py-1 px-2.5 rounded-md border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-700 hover:text-white transition-colors cursor-pointer shadow-2xs;
+  }
+  .btn-table-activate {
+    @apply inline-flex items-center gap-1 text-xs font-bold py-1 px-2.5 rounded-md border border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-700 hover:text-white transition-colors cursor-pointer shadow-2xs;
+  }
+  .btn-table-delete {
+    @apply inline-flex items-center gap-1 text-xs font-bold py-1 px-2.5 rounded-md border border-red-300 bg-red-50 text-red-900 hover:bg-red-700 hover:text-white transition-colors cursor-pointer shadow-2xs;
   }
 
   .btn-ghost {
@@ -224,27 +280,27 @@
 
   /* Badges — bigger text */
   .badge {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-md border select-none whitespace-nowrap;
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-bold rounded-md border select-none whitespace-nowrap;
   }
 
   .badge-success {
-    @apply bg-emerald-50 text-emerald-800 border-emerald-200;
+    @apply bg-emerald-100 text-emerald-950 border-emerald-400 font-bold;
   }
 
   .badge-warning {
-    @apply bg-amber-50 text-amber-800 border-amber-200;
+    @apply bg-amber-100 text-amber-950 border-amber-400 font-bold;
   }
 
   .badge-danger {
-    @apply bg-red-50 text-red-800 border-red-200;
+    @apply bg-red-100 text-red-950 border-red-400 font-bold;
   }
 
   .badge-info {
-    @apply bg-primary-50 text-primary-800 border-primary-200;
+    @apply bg-blue-100 text-blue-950 border-blue-400 font-bold;
   }
 
   .badge-neutral {
-    @apply bg-surface-100 text-surface-800 border-surface-200;
+    @apply bg-surface-100 text-surface-900 border-surface-300 font-bold;
   }
 
   /* Modal */
@@ -282,9 +338,9 @@
     @apply p-6 overflow-y-auto flex-1;
   }
 
-  /* Product card (for billing screen) — optimized for 5-column layout */
+  /* Product card (for billing screen) — responsive auto-scaling layout */
   .product-card {
-    @apply card p-2.5 cursor-pointer hover:shadow-md hover:border-primary-500 
+    @apply card p-2 sm:p-2.5 cursor-pointer hover:shadow-md hover:border-primary-500 
            transition-all duration-150 active:scale-[0.98] bg-white rounded-xl border border-surface-200/90;
   }
 
@@ -293,15 +349,15 @@
   }
 
   .product-card-name {
-    @apply text-sm sm:text-base font-extrabold text-surface-900 leading-snug line-clamp-2 min-h-[2.6rem];
+    @apply text-xs sm:text-sm font-extrabold text-surface-900 leading-snug line-clamp-2 min-h-[2.4rem] break-words;
   }
 
   .product-card-price {
-    @apply text-base sm:text-lg font-black text-primary-700 font-mono tracking-tight;
+    @apply text-sm sm:text-base font-black text-primary-700 font-mono tracking-tight;
   }
 
   .product-card-code {
-    @apply text-xs font-mono text-surface-500 truncate tracking-wide font-semibold;
+    @apply text-[11px] font-mono text-surface-500 truncate tracking-tight font-semibold;
   }
 
   /* Cart item */
@@ -324,15 +380,15 @@
            focus:outline-none focus:bg-primary-50;
   }
 
-  /* Category tabs — enlarged */
+  /* Category tabs — enlarged with dark corporate palette */
   .category-tab {
-    @apply px-5 py-2.5 text-base font-semibold rounded-xl border-2 border-surface-200 
-           text-surface-700 hover:bg-surface-50 hover:border-surface-300 cursor-pointer transition-all 
-           whitespace-nowrap shadow-sm;
+    @apply px-4 sm:px-5 py-2 sm:py-2.5 text-sm sm:text-base font-bold rounded-xl border border-surface-300 
+           text-surface-800 bg-white hover:bg-surface-100 hover:border-surface-400 cursor-pointer transition-all 
+           whitespace-nowrap shadow-2xs shrink-0;
   }
 
   .category-tab.active {
-    @apply bg-primary-600 text-white border-primary-600 shadow-sm;
+    @apply bg-primary-800 text-white border-primary-900 shadow-sm font-bold;
   }
 
   /* Search */
@@ -382,7 +438,7 @@
 
 @layer utilities {
   .currency::before {
-    content: '₹';
+    content: var(--currency-symbol, '₹');
   }
 }
 

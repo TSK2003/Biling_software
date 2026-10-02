@@ -115,6 +115,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::update_setting,
             commands::settings::get_setting,
+            commands::settings::get_audit_logs,
             // User management commands
             commands::users::get_users,
             commands::users::create_user,

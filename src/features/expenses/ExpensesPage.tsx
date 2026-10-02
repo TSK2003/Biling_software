@@ -21,7 +21,8 @@ import { api } from '../../lib/ipc';
 import { Header } from '../../components/Header';
 import { Modal } from '../../components/Modal';
 import { CustomSelect } from '../../components/CustomSelect';
-import { formatDateDMY } from '../../lib/format';
+import { useSettings } from '../../contexts/SettingsContext';
+import { formatDateDMY, formatCurrency } from '../../lib/format';
 import type {
   Expense,
   ExpenseCategory,
@@ -33,6 +34,7 @@ import type {
 import toast from 'react-hot-toast';
 
 export const ExpensesPage: React.FC = () => {
+  const { currencySymbol } = useSettings();
 
   // State: Data
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -57,7 +59,6 @@ export const ExpensesPage: React.FC = () => {
   const todayStr = useMemo(() => getLocalDateString(), []);
   const monthStartStr = useMemo(() => `${todayStr.slice(0, 7)}-01`, [todayStr]);
 
-  const [dateFilterMode, setDateFilterMode] = useState<'today' | 'yesterday' | 'month' | 'all' | 'custom'>('month');
   const [dateFrom, setDateFrom] = useState(monthStartStr);
   const [dateTo, setDateTo] = useState(todayStr);
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | 'all'>('all');
@@ -164,30 +165,6 @@ export const ExpensesPage: React.FC = () => {
   const [editCatDesc, setEditCatDesc] = useState('');
   const [isSavingCategory, setIsSavingCategory] = useState(false);
 
-  // Quick Preset Change
-  const handleDatePreset = (mode: 'today' | 'yesterday' | 'month' | 'all' | 'custom') => {
-    setDateFilterMode(mode);
-    setPage(1);
-
-    const now = new Date();
-    if (mode === 'today') {
-      const d = getLocalDateString(now);
-      setDateFrom(d);
-      setDateTo(d);
-    } else if (mode === 'yesterday') {
-      const y = new Date(now);
-      y.setDate(y.getDate() - 1);
-      const d = getLocalDateString(y);
-      setDateFrom(d);
-      setDateTo(d);
-    } else if (mode === 'month') {
-      setDateFrom(monthStartStr);
-      setDateTo(todayStr);
-    } else if (mode === 'all') {
-      setDateFrom('');
-      setDateTo('');
-    }
-  };
 
   // Load Categories
   const loadCategories = async () => {
@@ -490,15 +467,15 @@ export const ExpensesPage: React.FC = () => {
           {/* 1. Today */}
           <div className="bg-white p-4 rounded-xl border border-surface-200 shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-2xs font-bold text-surface-400 uppercase tracking-wider">Today's Expenses</p>
-              <h3 className="text-xl font-bold text-surface-900 mt-1">
-                ₹{((summary?.today_total_paise || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              <p className="text-xs font-bold text-surface-600 uppercase tracking-wider">Today's Expenses</p>
+              <h3 className="text-2xl font-black text-surface-900 mt-1">
+                {formatCurrency(summary?.today_total_paise || 0)}
               </h3>
-              <p className="text-2xs text-surface-500 mt-0.5">
+              <p className="text-xs text-surface-600 mt-0.5 font-medium">
                 {summary?.today_count || 0} transaction{summary?.today_count === 1 ? '' : 's'} recorded
               </p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
+            <div className="w-11 h-11 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-900 shadow-2xs flex-shrink-0">
               <Clock className="w-5 h-5" />
             </div>
           </div>
@@ -506,15 +483,15 @@ export const ExpensesPage: React.FC = () => {
           {/* 2. Month */}
           <div className="bg-white p-4 rounded-xl border border-surface-200 shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-2xs font-bold text-surface-400 uppercase tracking-wider">This Month</p>
-              <h3 className="text-xl font-bold text-surface-900 mt-1">
-                ₹{((summary?.month_total_paise || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              <p className="text-xs font-bold text-surface-600 uppercase tracking-wider">This Month</p>
+              <h3 className="text-2xl font-black text-surface-900 mt-1">
+                {formatCurrency(summary?.month_total_paise || 0)}
               </h3>
-              <p className="text-2xs text-surface-500 mt-0.5">
+              <p className="text-xs text-surface-600 mt-0.5 font-medium">
                 {summary?.month_count || 0} transaction{summary?.month_count === 1 ? '' : 's'} in month
               </p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+            <div className="w-11 h-11 rounded-xl bg-blue-100 border border-blue-300 flex items-center justify-center text-blue-950 shadow-2xs flex-shrink-0">
               <Calendar className="w-5 h-5" />
             </div>
           </div>
@@ -522,22 +499,22 @@ export const ExpensesPage: React.FC = () => {
           {/* 3. Filtered Total */}
           <div className="bg-white p-4 rounded-xl border border-surface-200 shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-2xs font-bold text-surface-400 uppercase tracking-wider">Filtered Period Total</p>
-              <h3 className="text-xl font-bold text-primary-600 mt-1">
-                ₹{((summary?.range_total_paise || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              <p className="text-xs font-bold text-surface-600 uppercase tracking-wider">Filtered Period Total</p>
+              <h3 className="text-2xl font-black text-blue-900 mt-1">
+                {formatCurrency(summary?.range_total_paise || 0)}
               </h3>
               <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                <span className="text-2xs text-surface-500">
+                <span className="text-xs text-surface-600 font-medium">
                   {summary?.range_count || 0} active record{summary?.range_count === 1 ? '' : 's'}
                 </span>
                 {(summary?.cancelled_range_count || 0) > 0 && (
-                  <span className="text-3xs font-semibold text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-200">
-                    ₹{((summary?.cancelled_range_total_paise || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })} voided ({summary?.cancelled_range_count})
+                  <span className="text-2xs font-bold text-red-900 bg-red-100 px-1.5 py-0.5 rounded border border-red-300">
+                    {formatCurrency(summary?.cancelled_range_total_paise || 0)} voided ({summary?.cancelled_range_count})
                   </span>
                 )}
               </div>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-primary-50 border border-primary-200 flex items-center justify-center text-primary-600">
+            <div className="w-11 h-11 rounded-xl bg-blue-100 border border-blue-300 flex items-center justify-center text-blue-950 shadow-2xs flex-shrink-0">
               <TrendingDown className="w-5 h-5" />
             </div>
           </div>
@@ -545,17 +522,17 @@ export const ExpensesPage: React.FC = () => {
           {/* 4. Top Category */}
           <div className="bg-white p-4 rounded-xl border border-surface-200 shadow-sm flex items-center justify-between">
             <div className="min-w-0 flex-1 pr-2">
-              <p className="text-2xs font-bold text-surface-400 uppercase tracking-wider">Top Expense Category</p>
-              <h3 className="text-sm font-bold text-surface-900 mt-1 truncate" title={summary?.category_totals?.[0]?.category_name || 'No Data'}>
+              <p className="text-xs font-bold text-surface-600 uppercase tracking-wider">Top Expense Category</p>
+              <h3 className="text-base font-extrabold text-surface-900 mt-1 truncate" title={summary?.category_totals?.[0]?.category_name || 'No Data'}>
                 {summary?.category_totals?.[0]?.category_name || 'No Data'}
               </h3>
-              <p className="text-2xs text-surface-500 mt-0.5">
+              <p className="text-xs text-surface-700 mt-0.5 font-bold">
                 {summary?.category_totals?.[0]
-                  ? `₹${((summary.category_totals[0].total_paise) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                  ? formatCurrency(summary.category_totals[0].total_paise)
                   : 'No expenses'}
               </p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-center text-purple-600 flex-shrink-0">
+            <div className="w-11 h-11 rounded-xl bg-purple-100 border border-purple-300 flex items-center justify-center text-purple-950 shadow-2xs flex-shrink-0">
               <Layers className="w-5 h-5" />
             </div>
           </div>
@@ -563,65 +540,47 @@ export const ExpensesPage: React.FC = () => {
 
         {/* Filters & Search Toolbar */}
         <div className="bg-white p-3.5 rounded-xl border border-surface-200 shadow-sm space-y-3">
-          {/* Row 1: Date Range & Timeline Presets */}
+          {/* Row 1: Date Range Filter (From & To only) */}
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2.5 flex-wrap">
-              {/* Jitter-Free Date Preset Buttons */}
-              <div className="inline-flex rounded-lg border border-surface-200 p-0.5 bg-surface-100 text-xs font-semibold">
-                {(['today', 'yesterday', 'month', 'all', 'custom'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => handleDatePreset(mode)}
-                    className={`px-3 py-1.5 rounded-md capitalize transition-all cursor-pointer text-xs font-semibold border ${
-                      dateFilterMode === mode
-                        ? 'bg-white text-primary-700 shadow-xs font-bold border-surface-200'
-                        : 'text-surface-600 hover:text-surface-900 border-transparent hover:bg-surface-200/50'
-                    }`}
-                  >
-                    {mode === 'month' ? 'This Month' : mode}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2 bg-surface-50 px-3 py-1.5 rounded-lg border border-surface-200 text-xs shadow-2xs">
+                <Calendar className="w-3.5 h-3.5 text-primary-600 flex-shrink-0" />
+                <span className="font-semibold text-surface-600">From:</span>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setDateFrom(val);
+                    if (val && dateTo && val > dateTo) setDateTo(val);
+                    setPage(1);
+                  }}
+                  className="bg-transparent border-0 text-xs font-mono font-semibold text-surface-900 p-0 focus:ring-0 cursor-pointer w-28"
+                  title="From Date"
+                />
+                <span className="text-surface-400 font-semibold mx-1">To:</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  min={dateFrom}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    setPage(1);
+                  }}
+                  className="bg-transparent border-0 text-xs font-mono font-semibold text-surface-900 p-0 focus:ring-0 cursor-pointer w-28"
+                  title="To Date"
+                />
               </div>
-
-              {/* Custom Date Range Pickers - Seamless and Stable */}
-              {dateFilterMode === 'custom' && (
-                <div className="flex items-center gap-2 bg-surface-50 px-3 py-1 rounded-lg border border-surface-200 h-8 shadow-2xs">
-                  <Calendar className="w-3.5 h-3.5 text-primary-600 flex-shrink-0" />
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => {
-                      setDateFrom(e.target.value);
-                      setPage(1);
-                    }}
-                    className="bg-transparent border-0 text-xs font-mono font-semibold text-surface-800 p-0 focus:ring-0 cursor-pointer w-28"
-                  />
-                  <span className="text-surface-400 text-xs font-medium">to</span>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => {
-                      setDateTo(e.target.value);
-                      setPage(1);
-                    }}
-                    className="bg-transparent border-0 text-xs font-mono font-semibold text-surface-800 p-0 focus:ring-0 cursor-pointer w-28"
-                  />
-                </div>
-              )}
             </div>
 
-            {/* Range indicator hint badge - Never renders raw 'to' text */}
-            <div className="text-2xs text-surface-500 font-medium hidden sm:flex items-center gap-1.5 bg-surface-50 px-2.5 py-1.5 rounded-lg border border-surface-200 shadow-2xs">
-              <Calendar className="w-3.5 h-3.5 text-surface-400 flex-shrink-0" />
-              <span>
-                {dateFilterMode === 'today' && "Showing today's transactions"}
-                {dateFilterMode === 'yesterday' && "Showing yesterday's transactions"}
-                {dateFilterMode === 'month' && "Showing current month transactions"}
-                {dateFilterMode === 'all' && "Showing all historical transactions"}
-                {dateFilterMode === 'custom' && (dateFrom && dateTo ? `${formatDateDMY(dateFrom)} to ${formatDateDMY(dateTo)}` : 'Select custom date range')}
-              </span>
-            </div>
+            {dateFrom && dateTo && (
+              <div className="text-2xs text-surface-500 font-medium hidden sm:flex items-center gap-1.5 bg-surface-50 px-2.5 py-1.5 rounded-lg border border-surface-200 shadow-2xs">
+                <Calendar className="w-3.5 h-3.5 text-surface-400 flex-shrink-0" />
+                <span>
+                  {dateFrom === dateTo ? formatDateDMY(dateFrom) : `${formatDateDMY(dateFrom)} to ${formatDateDMY(dateTo)}`}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Row 2: Search, Category, Payment Method & Reset */}
@@ -697,7 +656,6 @@ export const ExpensesPage: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                setDateFilterMode('month');
                 setDateFrom(monthStartStr);
                 setDateTo(todayStr);
                 setSelectedCategoryId('all');
@@ -794,7 +752,7 @@ export const ExpensesPage: React.FC = () => {
               <div className="text-2xs font-semibold text-red-700 bg-red-50 px-3 py-1 rounded-md border border-red-200 mb-1 flex items-center gap-1.5 shadow-2xs">
                 <XCircle className="w-3.5 h-3.5 text-red-500" />
                 <span>
-                  Voided in Filter: <strong>₹{((summary?.cancelled_range_total_paise || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong> ({summary?.cancelled_range_count} cancelled)
+                  Voided in Filter: <strong>{formatCurrency(summary?.cancelled_range_total_paise || 0)}</strong> ({summary?.cancelled_range_count} cancelled)
                 </span>
               </div>
             )}
@@ -941,7 +899,7 @@ export const ExpensesPage: React.FC = () => {
                           {/* 5. Voided Amount */}
                           <td className="px-4 py-3 text-right">
                             <div className="font-mono font-bold text-xs line-through text-red-600">
-                              ₹{(exp.amount_paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              {formatCurrency(exp.amount_paise)}
                             </div>
                             <span className="text-3xs text-surface-400 block font-medium">Reversed</span>
                           </td>
@@ -1025,7 +983,7 @@ export const ExpensesPage: React.FC = () => {
                               isCancelled ? 'line-through text-red-500' : 'text-surface-900'
                             }`}
                           >
-                            ₹{(exp.amount_paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            {formatCurrency(exp.amount_paise)}
                           </div>
                           {isCancelled && <span className="text-3xs text-surface-400 block font-medium">Reversed</span>}
                         </td>
@@ -1177,9 +1135,9 @@ export const ExpensesPage: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="form-group">
-              <label className="form-label text-xs font-semibold">Amount (₹) *</label>
+              <label className="form-label text-xs font-semibold">Amount ({currencySymbol}) *</label>
               <div className="relative">
-                <span className="absolute left-3 top-2.5 text-surface-400 font-bold text-xs">₹</span>
+                <span className="absolute left-3 top-2.5 text-surface-400 font-bold text-xs">{currencySymbol}</span>
                 <input
                   type="number"
                   step="0.01"
@@ -1291,7 +1249,7 @@ export const ExpensesPage: React.FC = () => {
                   detailExpense.status === 'cancelled' ? 'line-through text-red-600' : 'text-surface-900'
                 }`}
               >
-                ₹{(detailExpense.amount_paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                {formatCurrency(detailExpense.amount_paise)}
               </h2>
               <div className="flex items-center justify-center gap-2 mt-2">
                 <span
@@ -1458,7 +1416,7 @@ export const ExpensesPage: React.FC = () => {
               <div>
                 <p className="font-bold">Are you sure you want to cancel this expense?</p>
                 <p className="mt-0.5 text-amber-700">
-                  The amount of ₹{(cancellingExpense.amount_paise / 100).toFixed(2)} will be removed from financial summaries and preserved in Cancelled History.
+                  The amount of {formatCurrency(cancellingExpense.amount_paise)} will be removed from financial summaries and preserved in Cancelled History.
                 </p>
               </div>
             </div>
@@ -1485,7 +1443,7 @@ export const ExpensesPage: React.FC = () => {
                   EXP-{String(cancellingExpense.expense_number).padStart(4, '0')}
                 </span>
                 <span className="font-mono font-bold text-red-600 text-sm">
-                  ₹{(cancellingExpense.amount_paise / 100).toFixed(2)}
+                  {formatCurrency(cancellingExpense.amount_paise)}
                 </span>
               </div>
               <p className="font-medium text-surface-800 truncate">{cancellingExpense.title}</p>

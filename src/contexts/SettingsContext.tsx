@@ -2,12 +2,15 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Setting } from '../types';
 import { api } from '../lib/ipc';
 import { setGlobalCurrencySymbol } from '../lib/format';
+import { applyTheme, getActiveThemeId } from '../lib/theme';
 
 interface SettingsContextType {
   settings: Record<string, string>;
   isLoading: boolean;
   shopName: string;
   currencySymbol: string;
+  themeId: string;
+  setThemeId: (themeId: string) => Promise<void>;
   gstEnabled: boolean;
   gstNumber: string;
   defaultPaymentMethod: string;
@@ -32,6 +35,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (map['currency_symbol']) {
         setGlobalCurrencySymbol(map['currency_symbol']);
       }
+      if (map['app_theme_color']) {
+        applyTheme(map['app_theme_color']);
+      }
     } catch {
       // ignore
     } finally {
@@ -45,6 +51,14 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (key === 'currency_symbol') {
       setGlobalCurrencySymbol(value);
     }
+    if (key === 'app_theme_color') {
+      applyTheme(value);
+    }
+  };
+
+  const setThemeId = async (newThemeId: string) => {
+    applyTheme(newThemeId);
+    await updateSetting('app_theme_color', newThemeId);
   };
 
   useEffect(() => {
@@ -58,6 +72,8 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         isLoading,
         shopName: settings['shop_name'] || 'Billing Software',
         currencySymbol: settings['currency_symbol'] || '₹',
+        themeId: settings['app_theme_color'] || getActiveThemeId(),
+        setThemeId,
         gstEnabled: settings['gst_enabled'] === 'true',
         gstNumber: settings['gst_number'] || '',
         defaultPaymentMethod: settings['default_payment_method'] || 'cash',

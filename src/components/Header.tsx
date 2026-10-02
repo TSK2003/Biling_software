@@ -59,15 +59,15 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle, actions }) => {
         {/* License Badge */}
         {isActivated ? (
           <div
-            className="h-8 lg:h-9 px-2.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1.5 text-xs font-bold select-none flex-shrink-0"
+            className="h-8 lg:h-9 px-2.5 rounded-lg bg-emerald-100 text-emerald-950 border border-emerald-400 flex items-center gap-1.5 text-xs font-bold select-none flex-shrink-0 shadow-2xs"
             title={`Licensed to ${status?.shop_name || 'Authorized Shop'}`}
           >
-            <ShieldCheck className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-emerald-600 flex-shrink-0" />
+            <ShieldCheck className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-emerald-800 flex-shrink-0" />
             <span className="hidden xl:inline">Licensed</span>
           </div>
         ) : (
           <div
-            className="h-8 lg:h-9 px-2.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1.5 text-xs font-bold select-none flex-shrink-0"
+            className="h-8 lg:h-9 px-2.5 rounded-lg bg-amber-100 text-amber-950 border border-amber-400 flex items-center gap-1.5 text-xs font-bold select-none flex-shrink-0 shadow-2xs"
             title="License activation needed"
           >
             <span className="text-xs">Activation Needed</span>
@@ -76,10 +76,10 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle, actions }) => {
 
         {/* Shop LAN Multi-Computer Status */}
         <div
-          className={`h-8 lg:h-9 px-2.5 rounded-lg border flex items-center gap-1.5 text-xs font-bold select-none flex-shrink-0 ${
+          className={`h-8 lg:h-9 px-2.5 rounded-lg border flex items-center gap-1.5 text-xs font-bold select-none flex-shrink-0 shadow-2xs ${
             networkInfo?.mode === 'host'
-              ? 'bg-primary-50 text-primary-800 border-primary-200'
-              : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+              ? 'bg-blue-100 text-blue-950 border-blue-400'
+              : 'bg-indigo-100 text-indigo-950 border-indigo-400'
           }`}
           title={
             networkInfo?.mode === 'host'
@@ -89,12 +89,12 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle, actions }) => {
         >
           {networkInfo?.mode === 'host' ? (
             <>
-              <Server className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-primary-600 flex-shrink-0" />
+              <Server className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-blue-800 flex-shrink-0" />
               <span className="hidden xl:inline">Shop Host</span>
             </>
           ) : (
             <>
-              <Monitor className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-indigo-600 flex-shrink-0" />
+              <Monitor className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-indigo-800 flex-shrink-0" />
               <span className="hidden xl:inline">Cashier Client</span>
             </>
           )}
@@ -102,25 +102,25 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle, actions }) => {
 
         {/* Cloud / Internet Status Indicator */}
         <div
-          className="h-8 lg:h-9 px-2.5 rounded-lg bg-surface-50 text-surface-700 border border-surface-200 flex items-center gap-1.5 text-xs font-medium select-none flex-shrink-0"
+          className="h-8 lg:h-9 px-2.5 rounded-lg bg-teal-100 text-teal-950 border border-teal-400 flex items-center gap-1.5 text-xs font-bold select-none flex-shrink-0 shadow-2xs"
           title={isOnline ? 'Internet Active (Cloud sync ready)' : 'Internet Offline (Local billing unaffected)'}
         >
           {isOnline ? (
             <>
-              <Wifi className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-emerald-600 flex-shrink-0" />
+              <Wifi className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-teal-800 flex-shrink-0" />
               <span className="hidden xl:inline">Cloud Ready</span>
             </>
           ) : (
             <>
-              <WifiOff className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-surface-400 flex-shrink-0" />
+              <WifiOff className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-surface-600 flex-shrink-0" />
               <span className="hidden xl:inline">Offline</span>
             </>
           )}
         </div>
 
         {/* Live Clock — Always visible and securely pinned */}
-        <div className="h-8 lg:h-9 px-2.5 lg:px-3 rounded-lg bg-surface-100 border border-surface-200 flex items-center gap-1.5 text-xs lg:text-sm font-mono font-bold text-surface-800 select-none flex-shrink-0 shadow-2xs">
-          <Clock className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-primary-600 flex-shrink-0" />
+        <div className="h-8 lg:h-9 px-2.5 lg:px-3 rounded-lg bg-surface-100 border border-surface-300 flex items-center gap-1.5 text-xs lg:text-sm font-mono font-bold text-surface-900 select-none flex-shrink-0 shadow-xs">
+          <Clock className="w-3.5 h-3.5 lg:w-4 lg:h-4 text-primary-800 flex-shrink-0" />
           <span className="whitespace-nowrap">
             {currentTime.toLocaleTimeString('en-IN', {
               hour: '2-digit',

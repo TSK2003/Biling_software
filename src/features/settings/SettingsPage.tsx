@@ -23,8 +23,15 @@ import {
   Play,
   KeyRound,
   Usb,
+  Calendar,
+  Search,
+  Clock,
+  User as UserIcon,
+  ChevronLeft,
+  ChevronRight,
+  Palette,
 } from 'lucide-react';
-import type { PrinterInfo, DriveInfo } from '../../types';
+import type { PrinterInfo, DriveInfo, AuditLog } from '../../types';
 import { api } from '../../lib/ipc';
 import { Header } from '../../components/Header';
 import { CustomSelect } from '../../components/CustomSelect';
@@ -33,7 +40,8 @@ import { useLicense } from '../../contexts/LicenseContext';
 import { useNetwork } from '../../contexts/NetworkContext';
 import { SetupModeModal } from '../network/SetupModeModal';
 import { BackupPage } from '../backup/BackupPage';
-import { setGlobalCurrencySymbol } from '../../lib/format';
+import { setGlobalCurrencySymbol, formatCurrency } from '../../lib/format';
+import { THEME_OPTIONS, applyTheme, getActiveThemeId } from '../../lib/theme';
 import toast from 'react-hot-toast';
 
 export const CURRENCY_OPTIONS = [
@@ -71,10 +79,10 @@ export const SettingsPage: React.FC = () => {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<
-    'shop' | 'gst' | 'printer' | 'network' | 'backup' | 'license' | 'danger'
+    'shop' | 'gst' | 'printer' | 'network' | 'backup' | 'license' | 'logs' | 'danger'
   >(() => {
     const tab = new URLSearchParams(window.location.search).get('tab');
-    if (tab && ['shop', 'gst', 'printer', 'network', 'backup', 'license', 'danger'].includes(tab)) {
+    if (tab && ['shop', 'gst', 'printer', 'network', 'backup', 'license', 'logs', 'danger'].includes(tab)) {
       return tab as any;
     }
     return 'shop';
@@ -82,10 +90,104 @@ export const SettingsPage: React.FC = () => {
 
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab && ['shop', 'gst', 'printer', 'network', 'backup', 'license', 'danger'].includes(tab)) {
+    if (tab && ['shop', 'gst', 'printer', 'network', 'backup', 'license', 'logs', 'danger'].includes(tab)) {
       setActiveTab(tab as any);
     }
   }, [searchParams]);
+
+  // Settings Tabs Horizontal Scroll State & Helpers
+  const tabsScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollTabsLeft, setCanScrollTabsLeft] = useState(false);
+  const [canScrollTabsRight, setCanScrollTabsRight] = useState(false);
+
+  const checkTabsScroll = React.useCallback(() => {
+    const el = tabsScrollRef.current;
+    if (el) {
+      const hasOverflow = el.scrollWidth > el.clientWidth + 2;
+      setCanScrollTabsLeft(el.scrollLeft > 4);
+      setCanScrollTabsRight(hasOverflow && el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkTabsScroll();
+    const raf = requestAnimationFrame(checkTabsScroll);
+    const timer = setTimeout(checkTabsScroll, 120);
+
+    const el = tabsScrollRef.current;
+    let ro: ResizeObserver | null = null;
+    if (el && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => checkTabsScroll());
+      ro.observe(el);
+    }
+
+    const handleResize = () => checkTabsScroll();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      window.removeEventListener('resize', handleResize);
+      if (ro) ro.disconnect();
+    };
+  }, [checkTabsScroll]);
+
+  // Auto-scroll active tab into view when activeTab changes
+  useEffect(() => {
+    const el = tabsScrollRef.current;
+    if (el) {
+      const activeBtn = el.querySelector('[data-active-tab="true"]') as HTMLElement;
+      if (activeBtn) {
+        activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+      }
+      setTimeout(checkTabsScroll, 200);
+    }
+  }, [activeTab, checkTabsScroll]);
+
+  const handleScrollTabs = (direction: 'left' | 'right') => {
+    if (tabsScrollRef.current) {
+      const scrollAmount = direction === 'left' ? -200 : 200;
+      tabsScrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+      setTimeout(checkTabsScroll, 150);
+      setTimeout(checkTabsScroll, 350);
+    }
+  };
+
+  // Logs Tab State
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [isLogsLoading, setIsLogsLoading] = useState(false);
+  const [logDateFrom, setLogDateFrom] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [logDateTo, setLogDateTo] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [logSearch, setLogSearch] = useState('');
+  const [logActionFilter, setLogActionFilter] = useState('');
+
+  const loadAuditLogs = async () => {
+    setIsLogsLoading(true);
+    try {
+      const data = await api.getAuditLogs({
+        dateFrom: logDateFrom || undefined,
+        dateTo: logDateTo || undefined,
+        search: logSearch.trim() || undefined,
+        limit: 1000,
+      });
+      setAuditLogs(data || []);
+    } catch (err: any) {
+      console.error('Failed to load audit logs:', err);
+    } finally {
+      setIsLogsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'logs') {
+      loadAuditLogs();
+    }
+  }, [activeTab, logDateFrom, logDateTo]);
 
   const isSetupModalOpenState = useState(false);
   const [isSetupModalOpen, setIsSetupModalOpen] = isSetupModalOpenState;
@@ -106,7 +208,17 @@ export const SettingsPage: React.FC = () => {
     return code === 'CUSTOM' ? cur : '';
   });
   const [shopLogo, setShopLogo] = useState(settings['shop_logo'] || '');
+  const [selectedThemeId, setSelectedThemeId] = useState<string>(() => settings['app_theme_color'] || getActiveThemeId());
   const logoInputRef = useRef<HTMLInputElement>(null);
+
+  // Print on Bill Checkbox states
+  const [printShopLogo, setPrintShopLogo] = useState(settings['print_shop_logo'] !== 'false');
+  const [printShopName, setPrintShopName] = useState(settings['print_shop_name'] !== 'false');
+  const [printShopPhone, setPrintShopPhone] = useState(settings['print_shop_phone'] !== 'false');
+  const [printShopAddress, setPrintShopAddress] = useState(settings['print_shop_address'] !== 'false');
+  const [printShopEmail, setPrintShopEmail] = useState(settings['print_shop_email'] !== 'false');
+  const [printFssaiNumber, setPrintFssaiNumber] = useState(settings['print_fssai_number'] !== 'false');
+  const [printReceiptFooter, setPrintReceiptFooter] = useState(settings['print_receipt_footer'] !== 'false');
 
   const [gstEnabled, setGstEnabled] = useState(settings['gst_enabled'] === 'true');
   const [gstNumber, setGstNumber] = useState(settings['gst_number'] || '');
@@ -222,13 +334,35 @@ export const SettingsPage: React.FC = () => {
       await updateSetting('currency_symbol', finalCurrency);
       await updateSetting('default_payment_method', defaultPayment);
       await updateSetting('shop_logo', shopLogo);
+
+      // Save Print on Bill Checkbox Settings
+      await updateSetting('print_shop_logo', printShopLogo ? 'true' : 'false');
+      await updateSetting('print_shop_name', printShopName ? 'true' : 'false');
+      await updateSetting('print_shop_phone', printShopPhone ? 'true' : 'false');
+      await updateSetting('print_shop_address', printShopAddress ? 'true' : 'false');
+      await updateSetting('print_shop_email', printShopEmail ? 'true' : 'false');
+      // Save Theme Color
+      await updateSetting('app_theme_color', selectedThemeId);
+      applyTheme(selectedThemeId);
+
       setGlobalCurrencySymbol(finalCurrency);
       await reloadSettings();
-      toast.success('Shop profile & receipt details updated successfully');
+      toast.success('Shop profile, currency & theme updated successfully');
     } catch {
       toast.error('Failed to save settings');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSelectTheme = async (newThemeId: string) => {
+    setSelectedThemeId(newThemeId);
+    applyTheme(newThemeId);
+    try {
+      await updateSetting('app_theme_color', newThemeId);
+      toast.success(`Theme updated to ${THEME_OPTIONS.find((t) => t.id === newThemeId)?.name || 'Custom Theme'}`);
+    } catch {
+      // ignore
     }
   };
 
@@ -367,6 +501,14 @@ export const SettingsPage: React.FC = () => {
         setCustomCurrencySymbol(cur);
       }
     }
+    if (settings['print_shop_logo'] !== undefined) setPrintShopLogo(settings['print_shop_logo'] !== 'false');
+    if (settings['print_shop_name'] !== undefined) setPrintShopName(settings['print_shop_name'] !== 'false');
+    if (settings['print_shop_phone'] !== undefined) setPrintShopPhone(settings['print_shop_phone'] !== 'false');
+    if (settings['print_shop_address'] !== undefined) setPrintShopAddress(settings['print_shop_address'] !== 'false');
+    if (settings['print_shop_email'] !== undefined) setPrintShopEmail(settings['print_shop_email'] !== 'false');
+    if (settings['print_fssai_number'] !== undefined) setPrintFssaiNumber(settings['print_fssai_number'] !== 'false');
+    if (settings['print_receipt_footer'] !== undefined) setPrintReceiptFooter(settings['print_receipt_footer'] !== 'false');
+    if (settings['app_theme_color']) setSelectedThemeId(settings['app_theme_color']);
   }, [settings]);
 
   return (
@@ -377,121 +519,194 @@ export const SettingsPage: React.FC = () => {
       />
 
       <div className="p-6 overflow-y-auto flex-1 w-full space-y-5">
-        {/* Settings Navigation Tabs */}
-        <div className="bg-white p-1 rounded-lg border border-surface-200 shadow-xs flex items-center gap-1 flex-wrap">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('shop');
-              setSearchParams({ tab: 'shop' });
-            }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
-              activeTab === 'shop'
-                ? 'bg-primary-600 text-white shadow-xs'
-                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
-            }`}
-          >
-            <Store className="w-3.5 h-3.5" />
-            <span>Shop Profile</span>
-          </button>
+        {/* Settings Navigation Tabs Bar with Smooth Horizontal Scrolling & Navigation Chevrons */}
+        <div className="bg-white p-2 rounded-xl border border-surface-200 shadow-xs flex items-center justify-between gap-2 overflow-hidden select-none">
+          {/* Scrollable Tabs Container flanked by Left & Right Chevrons */}
+          <div className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0">
+            {/* Left Scroll Chevron Button */}
+            <button
+              type="button"
+              onClick={() => handleScrollTabs('left')}
+              disabled={!canScrollTabsLeft}
+              className={`h-8 w-7 rounded-lg flex items-center justify-center shrink-0 transition-all border ${
+                canScrollTabsLeft
+                  ? 'bg-white hover:bg-surface-100 text-surface-800 hover:text-primary-800 border-surface-300 shadow-2xs cursor-pointer active:scale-95'
+                  : 'bg-surface-100/50 text-surface-300 border-transparent cursor-not-allowed opacity-30'
+              }`}
+              title="Scroll tabs left"
+            >
+              <ChevronLeft className="w-4 h-4 font-bold" />
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('gst');
-              setSearchParams({ tab: 'gst' });
-            }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
-              activeTab === 'gst'
-                ? 'bg-primary-600 text-white shadow-xs'
-                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
-            }`}
-          >
-            <Receipt className="w-3.5 h-3.5" />
-            <span>GST & Tax Config</span>
-          </button>
+            {/* Scrollable Tabs List - Completely Hidden Scrollbar with Mouse Wheel Translation */}
+            <div
+              ref={tabsScrollRef}
+              onScroll={checkTabsScroll}
+              onWheel={(e) => {
+                const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+                if (delta !== 0 && tabsScrollRef.current) {
+                  tabsScrollRef.current.scrollLeft += delta;
+                  checkTabsScroll();
+                }
+              }}
+              className="flex items-center gap-1 xl:gap-1.5 overflow-x-auto no-scrollbar flex-nowrap flex-1 min-w-0 py-0.5 scroll-smooth"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+            >
+              <button
+                type="button"
+                data-active-tab={activeTab === 'shop' ? 'true' : 'false'}
+                onClick={() => {
+                  setActiveTab('shop');
+                  setSearchParams({ tab: 'shop' });
+                }}
+                className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap ${
+                  activeTab === 'shop'
+                    ? 'bg-primary-800 text-white border border-primary-900 shadow-xs'
+                    : 'text-surface-800 hover:text-surface-950 hover:bg-surface-100 font-semibold'
+                }`}
+              >
+                <Store className="w-3.5 h-3.5" />
+                <span>Shop Profile</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('printer');
-              setSearchParams({ tab: 'printer' });
-            }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
-              activeTab === 'printer'
-                ? 'bg-primary-600 text-white shadow-xs'
-                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
-            }`}
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Bill Printing</span>
-          </button>
+              <button
+                type="button"
+                data-active-tab={activeTab === 'gst' ? 'true' : 'false'}
+                onClick={() => {
+                  setActiveTab('gst');
+                  setSearchParams({ tab: 'gst' });
+                }}
+                className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap ${
+                  activeTab === 'gst'
+                    ? 'bg-primary-800 text-white border border-primary-900 shadow-xs'
+                    : 'text-surface-800 hover:text-surface-950 hover:bg-surface-100 font-semibold'
+                }`}
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                <span>GST & Tax Config</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('network');
-              setSearchParams({ tab: 'network' });
-            }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
-              activeTab === 'network'
-                ? 'bg-primary-600 text-white shadow-xs'
-                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
-            }`}
-          >
-            <Wifi className="w-3.5 h-3.5" />
-            <span>Network & Devices</span>
-          </button>
+              <button
+                type="button"
+                data-active-tab={activeTab === 'printer' ? 'true' : 'false'}
+                onClick={() => {
+                  setActiveTab('printer');
+                  setSearchParams({ tab: 'printer' });
+                }}
+                className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap ${
+                  activeTab === 'printer'
+                    ? 'bg-primary-800 text-white border border-primary-900 shadow-xs'
+                    : 'text-surface-800 hover:text-surface-950 hover:bg-surface-100 font-semibold'
+                }`}
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Bill Printing</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('backup');
-              setSearchParams({ tab: 'backup' });
-            }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
-              activeTab === 'backup'
-                ? 'bg-primary-600 text-white shadow-xs'
-                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
-            }`}
-          >
-            <HardDrive className="w-3.5 h-3.5" />
-            <span>Backup & Restore</span>
-          </button>
+              <button
+                type="button"
+                data-active-tab={activeTab === 'network' ? 'true' : 'false'}
+                onClick={() => {
+                  setActiveTab('network');
+                  setSearchParams({ tab: 'network' });
+                }}
+                className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap ${
+                  activeTab === 'network'
+                    ? 'bg-primary-800 text-white border border-primary-900 shadow-xs'
+                    : 'text-surface-800 hover:text-surface-950 hover:bg-surface-100 font-semibold'
+                }`}
+              >
+                <Wifi className="w-3.5 h-3.5" />
+                <span>Network & Devices</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('license');
-              setSearchParams({ tab: 'license' });
-            }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${
-              activeTab === 'license'
-                ? 'bg-primary-600 text-white shadow-xs'
-                : 'text-surface-600 hover:text-surface-900 hover:bg-surface-100/80'
-            }`}
-          >
-            <Shield className="w-3.5 h-3.5" />
-            <span>License & Security</span>
-          </button>
+              <button
+                type="button"
+                data-active-tab={activeTab === 'backup' ? 'true' : 'false'}
+                onClick={() => {
+                  setActiveTab('backup');
+                  setSearchParams({ tab: 'backup' });
+                }}
+                className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap ${
+                  activeTab === 'backup'
+                    ? 'bg-primary-800 text-white border border-primary-900 shadow-xs'
+                    : 'text-surface-800 hover:text-surface-950 hover:bg-surface-100 font-semibold'
+                }`}
+              >
+                <HardDrive className="w-3.5 h-3.5" />
+                <span>Backup & Restore</span>
+              </button>
 
-          <div className="h-5 w-px bg-surface-200 mx-1 hidden sm:block" />
+              <button
+                type="button"
+                data-active-tab={activeTab === 'license' ? 'true' : 'false'}
+                onClick={() => {
+                  setActiveTab('license');
+                  setSearchParams({ tab: 'license' });
+                }}
+                className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap ${
+                  activeTab === 'license'
+                    ? 'bg-primary-800 text-white border border-primary-900 shadow-xs'
+                    : 'text-surface-800 hover:text-surface-950 hover:bg-surface-100 font-semibold'
+                }`}
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span>License & Security</span>
+              </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('danger');
-              setSearchParams({ tab: 'danger' });
-            }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ml-auto ${
-              activeTab === 'danger'
-                ? 'bg-red-600 text-white shadow-xs'
-                : 'text-red-600 hover:bg-red-50 hover:text-red-700'
-            }`}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Reset Data</span>
-          </button>
+              <button
+                type="button"
+                data-active-tab={activeTab === 'logs' ? 'true' : 'false'}
+                onClick={() => {
+                  setActiveTab('logs');
+                  setSearchParams({ tab: 'logs' });
+                }}
+                className={`px-2.5 xl:px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap ${
+                  activeTab === 'logs'
+                    ? 'bg-primary-800 text-white border border-primary-900 shadow-xs'
+                    : 'text-surface-800 hover:text-surface-950 hover:bg-surface-100 font-semibold'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Activity & System Logs</span>
+              </button>
+            </div>
+
+            {/* Right Scroll Chevron Button */}
+            <button
+              type="button"
+              onClick={() => handleScrollTabs('right')}
+              disabled={!canScrollTabsRight}
+              className={`h-8 w-7 rounded-lg flex items-center justify-center shrink-0 transition-all border ${
+                canScrollTabsRight
+                  ? 'bg-white hover:bg-surface-100 text-surface-800 hover:text-primary-800 border-surface-300 shadow-2xs cursor-pointer active:scale-95'
+                  : 'bg-surface-100/50 text-surface-300 border-transparent cursor-not-allowed opacity-30'
+              }`}
+              title="Scroll tabs right"
+            >
+              <ChevronRight className="w-4 h-4 font-bold" />
+            </button>
+          </div>
+
+          {/* Reset Data - Strictly Pinned on the Right of the same row with clear divider */}
+          <div className="flex items-center pl-2.5 border-l border-surface-300 shrink-0">
+            <button
+              type="button"
+              data-active-tab={activeTab === 'danger' ? 'true' : 'false'}
+              onClick={() => {
+                setActiveTab('danger');
+                setSearchParams({ tab: 'danger' });
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 whitespace-nowrap ${
+                activeTab === 'danger'
+                  ? 'bg-red-800 text-white border border-red-900 shadow-xs'
+                  : 'text-red-900 bg-red-50 hover:bg-red-800 hover:text-white border border-red-300 shadow-2xs'
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Reset Data</span>
+            </button>
+          </div>
         </div>
 
         {/* Tab 1: Shop Profile */}
@@ -511,7 +726,20 @@ export const SettingsPage: React.FC = () => {
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold text-surface-800">Shop / Business Logo</div>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="text-xs font-bold text-surface-800">Shop / Business Logo</div>
+                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none bg-white px-2.5 py-1 rounded-md border border-surface-200 shadow-2xs hover:border-primary-400 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={printShopLogo}
+                      onChange={(e) => setPrintShopLogo(e.target.checked)}
+                      className="form-checkbox text-primary-600 rounded w-3.5 h-3.5"
+                    />
+                    <span className={printShopLogo ? 'text-primary-700 font-bold' : 'text-surface-400'}>
+                      Print Logo on Bill
+                    </span>
+                  </label>
+                </div>
                 <div className="text-2xs text-surface-500 mt-0.5">
                   Appears on login page, sidebar, and printed bill receipts. PNG, JPG or SVG (Max 2MB).
                 </div>
@@ -547,7 +775,20 @@ export const SettingsPage: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="form-group">
-                <label className="form-label">Shop Name *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="form-label mb-0">Shop Name *</label>
+                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={printShopName}
+                      onChange={(e) => setPrintShopName(e.target.checked)}
+                      className="form-checkbox text-primary-600 rounded w-3.5 h-3.5"
+                    />
+                    <span className={printShopName ? 'text-primary-700 font-bold' : 'text-surface-400'}>
+                      Print on Bill
+                    </span>
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={shopName}
@@ -558,7 +799,20 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Contact Phone</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="form-label mb-0">Contact Phone</label>
+                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={printShopPhone}
+                      onChange={(e) => setPrintShopPhone(e.target.checked)}
+                      className="form-checkbox text-primary-600 rounded w-3.5 h-3.5"
+                    />
+                    <span className={printShopPhone ? 'text-primary-700 font-bold' : 'text-surface-400'}>
+                      Print on Bill
+                    </span>
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={shopPhone}
@@ -570,7 +824,20 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Shop Address</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="form-label mb-0">Shop Address</label>
+                <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={printShopAddress}
+                    onChange={(e) => setPrintShopAddress(e.target.checked)}
+                    className="form-checkbox text-primary-600 rounded w-3.5 h-3.5"
+                  />
+                  <span className={printShopAddress ? 'text-primary-700 font-bold' : 'text-surface-400'}>
+                    Print on Bill
+                  </span>
+                </label>
+              </div>
               <textarea
                 value={shopAddress}
                 onChange={(e) => setShopAddress(e.target.value)}
@@ -582,7 +849,20 @@ export const SettingsPage: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="form-group">
-                <label className="form-label">Shop Email (Optional)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="form-label mb-0">Shop Email (Optional)</label>
+                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={printShopEmail}
+                      onChange={(e) => setPrintShopEmail(e.target.checked)}
+                      className="form-checkbox text-primary-600 rounded w-3.5 h-3.5"
+                    />
+                    <span className={printShopEmail ? 'text-primary-700 font-bold' : 'text-surface-400'}>
+                      Print on Bill
+                    </span>
+                  </label>
+                </div>
                 <input
                   type="email"
                   value={shopEmail}
@@ -593,7 +873,20 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">FSSAI / License Number</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="form-label mb-0">FSSAI / License Number</label>
+                  <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={printFssaiNumber}
+                      onChange={(e) => setPrintFssaiNumber(e.target.checked)}
+                      className="form-checkbox text-primary-600 rounded w-3.5 h-3.5"
+                    />
+                    <span className={printFssaiNumber ? 'text-primary-700 font-bold' : 'text-surface-400'}>
+                      Print on Bill
+                    </span>
+                  </label>
+                </div>
                 <input
                   type="text"
                   value={fssaiNumber}
@@ -602,13 +895,26 @@ export const SettingsPage: React.FC = () => {
                   className="form-input font-mono"
                 />
                 <p className="text-2xs text-surface-500 mt-1">
-                  Printed permanently on all bill receipts whenever details are provided.
+                  Printed on all bill receipts whenever details are provided and print option is checked.
                 </p>
               </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Receipt Footer Message</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="form-label mb-0">Receipt Footer Message</label>
+                <label className="inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={printReceiptFooter}
+                    onChange={(e) => setPrintReceiptFooter(e.target.checked)}
+                    className="form-checkbox text-primary-600 rounded w-3.5 h-3.5"
+                  />
+                  <span className={printReceiptFooter ? 'text-primary-700 font-bold' : 'text-surface-400'}>
+                    Print on Bill
+                  </span>
+                </label>
+              </div>
               <input
                 type="text"
                 value={receiptFooter}
@@ -617,7 +923,7 @@ export const SettingsPage: React.FC = () => {
                 className="form-input"
               />
               <p className="text-2xs text-surface-500 mt-0.5">
-                Printed at the bottom of all customer thermal and paper receipts.
+                Printed at the bottom of all customer thermal and paper receipts when print option is checked.
               </p>
             </div>
 
@@ -677,6 +983,104 @@ export const SettingsPage: React.FC = () => {
                   size="lg"
                   buttonClassName="w-full h-10 text-sm font-medium rounded-lg"
                 />
+              </div>
+            </div>
+
+            {/* Application Theme & Visual Appearance Section */}
+            <div className="pt-4 border-t border-surface-200 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-bold text-surface-900 flex items-center gap-2">
+                    <Palette className="w-4 h-4 text-primary-700" />
+                    <span>Application Theme & Color Scheme</span>
+                  </h4>
+                  <p className="text-xs text-surface-500 mt-0.5">
+                    Personalize the primary and accent colors for the entire application to match your store identity and visual comfort.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-surface-500 font-medium">Active:</span>
+                  <span className="text-xs font-bold bg-primary-100 text-primary-950 border border-primary-300 px-2.5 py-1 rounded-full shadow-2xs">
+                    {THEME_OPTIONS.find((t) => t.id === selectedThemeId)?.name || 'Corporate Navy'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                {THEME_OPTIONS.map((th) => {
+                  const isSelected = selectedThemeId === th.id;
+                  return (
+                    <div
+                      key={th.id}
+                      onClick={() => handleSelectTheme(th.id)}
+                      className={`group relative p-3 rounded-xl border-2 cursor-pointer transition-all duration-150 flex flex-col justify-between ${
+                        isSelected
+                          ? 'border-primary-800 bg-primary-50/50 shadow-sm ring-2 ring-primary-800/20'
+                          : 'border-surface-200 bg-white hover:border-surface-300 hover:shadow-xs'
+                      }`}
+                    >
+                      <div>
+                        {/* Top: Color Swatches & Selection Badge */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="w-5 h-5 rounded-full shadow-2xs border border-white shrink-0"
+                              style={{ backgroundColor: th.primaryHex }}
+                              title="Primary Shade"
+                            />
+                            <span
+                              className="w-3.5 h-3.5 rounded-full shadow-2xs border border-white shrink-0"
+                              style={{ backgroundColor: th.accentHex }}
+                              title="Accent Shade"
+                            />
+                            <span
+                              className="w-3 h-3 rounded-full shadow-2xs border border-white shrink-0"
+                              style={{ backgroundColor: th.badgeHex }}
+                              title="Badge Shade"
+                            />
+                          </div>
+                          {isSelected ? (
+                            <span className="w-5 h-5 rounded-full bg-primary-800 text-white flex items-center justify-center text-xs shadow-2xs">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            </span>
+                          ) : (
+                            <span className="w-4 h-4 rounded-full border-2 border-surface-300 group-hover:border-surface-400" />
+                          )}
+                        </div>
+
+                        {/* Theme Name & Description */}
+                        <div className="mt-2.5">
+                          <h5 className="text-xs font-bold text-surface-900 group-hover:text-primary-900 transition-colors">
+                            {th.name}
+                          </h5>
+                          <p className="text-[11px] text-surface-500 leading-tight mt-0.5 line-clamp-2">
+                            {th.tagline}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Mini Live Preview Strip */}
+                      <div className="mt-3 pt-2 border-t border-surface-100 flex items-center justify-between gap-1">
+                        <span
+                          className="text-[10px] font-bold px-2 py-0.5 rounded text-white shadow-2xs shrink-0"
+                          style={{ backgroundColor: th.primaryHex }}
+                        >
+                          Button
+                        </span>
+                        <span
+                          className="text-[9px] font-bold px-1.5 py-0.2 rounded border shrink-0"
+                          style={{
+                            backgroundColor: th.badgeHex,
+                            borderColor: th.accentHex,
+                            color: th.primaryHex,
+                          }}
+                        >
+                          Active Badge
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -1408,6 +1812,308 @@ export const SettingsPage: React.FC = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+        {/* Tab: Activity & System Logs */}
+        {activeTab === 'logs' && (
+          <div className="card p-5 space-y-4 bg-white border border-surface-200 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-surface-100 gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-surface-900 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-primary-600" />
+                  <span>Movement & System Activity Logs</span>
+                </h3>
+                <p className="text-2xs text-surface-500 mt-0.5">
+                  Complete audit trail tracking sales, returns, stock adjustments, expenses, user sessions, and settings changes.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={loadAuditLogs}
+                  disabled={isLogsLoading}
+                  className="btn-secondary h-8 px-3 text-xs font-semibold flex items-center gap-1.5 shadow-2xs"
+                  title="Reload audit logs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLogsLoading ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar with Date Filter: ONLY From and To date inputs (No presets) */}
+            <div className="bg-surface-50 p-2.5 sm:p-3 rounded-xl border border-surface-200 flex flex-wrap items-center gap-2.5">
+              {/* From Date Picker */}
+              <div className="flex items-center gap-1.5 bg-white px-3 h-9 rounded-lg border border-surface-300 text-xs shadow-2xs focus-within:border-primary-700 focus-within:ring-1 focus-within:ring-primary-700/20">
+                <Calendar className="w-3.5 h-3.5 text-primary-700 flex-shrink-0" />
+                <span className="font-bold text-surface-700 text-xs shrink-0">From:</span>
+                <input
+                  type="date"
+                  value={logDateFrom}
+                  onChange={(e) => setLogDateFrom(e.target.value)}
+                  className="bg-transparent border-0 text-xs font-mono font-bold text-surface-900 p-0 focus:ring-0 cursor-pointer w-28 outline-none"
+                  title="From Date"
+                />
+              </div>
+
+              {/* To Date Picker */}
+              <div className="flex items-center gap-1.5 bg-white px-3 h-9 rounded-lg border border-surface-300 text-xs shadow-2xs focus-within:border-primary-700 focus-within:ring-1 focus-within:ring-primary-700/20">
+                <Calendar className="w-3.5 h-3.5 text-primary-700 flex-shrink-0" />
+                <span className="font-bold text-surface-700 text-xs shrink-0">To:</span>
+                <input
+                  type="date"
+                  value={logDateTo}
+                  min={logDateFrom}
+                  onChange={(e) => setLogDateTo(e.target.value)}
+                  className="bg-transparent border-0 text-xs font-mono font-bold text-surface-900 p-0 focus:ring-0 cursor-pointer w-28 outline-none"
+                  title="To Date"
+                />
+              </div>
+
+              {/* Action Filter */}
+              <CustomSelect
+                value={logActionFilter}
+                onChange={setLogActionFilter}
+                options={[
+                  { value: '', label: 'All Actions' },
+                  { value: 'create', label: 'Create (Bills, Products, etc.)' },
+                  { value: 'return_bill', label: 'Returns & Refunds' },
+                  { value: 'void', label: 'Voided Bills' },
+                  { value: 'cancel', label: 'Cancelled Items' },
+                  { value: 'update', label: 'Updates & Edits' },
+                  { value: 'delete', label: 'Deletions' },
+                  { value: 'restock', label: 'Stock Movements' },
+                  { value: 'login', label: 'User Logins' },
+                  { value: 'logout', label: 'User Logouts' },
+                ]}
+                className="w-48"
+                size="sm"
+                buttonClassName="h-9 text-xs font-bold bg-white border-surface-300 text-surface-800"
+              />
+
+              {/* Search Filter */}
+              <div className="relative flex-1 min-w-[220px]">
+                <Search className="w-4 h-4 text-surface-500 absolute left-3 top-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={logSearch}
+                  onChange={(e) => setLogSearch(e.target.value)}
+                  placeholder="Search user, action, details..."
+                  className="form-input pl-9 h-9 text-xs w-full bg-white border-surface-300 shadow-2xs font-medium"
+                />
+                {logSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setLogSearch('')}
+                    className="absolute right-2.5 top-2.5 text-2xs text-surface-500 hover:text-surface-800 font-bold"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {(logSearch || logActionFilter) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLogSearch('');
+                    setLogActionFilter('');
+                  }}
+                  className="h-9 px-3 text-xs text-primary-700 hover:text-primary-800 font-bold border border-primary-200 bg-primary-50/70 rounded-lg hover:bg-primary-100 transition-colors"
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+
+            {/* Logs Table */}
+            <div className="border border-surface-200 rounded-xl overflow-hidden shadow-2xs">
+              <div className="max-h-[520px] overflow-y-auto">
+                <table className="table w-full text-xs">
+                  <thead className="bg-surface-50 sticky top-0 z-10 border-b border-surface-200">
+                    <tr>
+                      <th className="py-2.5 px-3 text-left w-40 whitespace-nowrap font-bold text-surface-700">Date & Time</th>
+                      <th className="py-2.5 px-3 text-left w-36 whitespace-nowrap font-bold text-surface-700">User / Staff</th>
+                      <th className="py-2.5 px-3 text-center w-36 whitespace-nowrap font-bold text-surface-700">Action</th>
+                      <th className="py-2.5 px-3 text-left w-28 whitespace-nowrap font-bold text-surface-700">Module</th>
+                      <th className="py-2.5 px-3 text-left font-bold text-surface-700">Details & Summary</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-100 bg-white">
+                    {isLogsLoading ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center text-surface-400">
+                          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-primary-600" />
+                          <span>Loading activity logs...</span>
+                        </td>
+                      </tr>
+                    ) : auditLogs.filter((log) => {
+                        if (logActionFilter && log.action.toLowerCase() !== logActionFilter.toLowerCase()) {
+                          return false;
+                        }
+                        if (logSearch.trim()) {
+                          const q = logSearch.toLowerCase().trim();
+                          const act = (log.action || '').toLowerCase();
+                          const ent = (log.entity_type || '').toLowerCase();
+                          const usr = (log.user_name || '').toLowerCase();
+                          const det = (log.details_json || '').toLowerCase();
+                          if (!act.includes(q) && !ent.includes(q) && !usr.includes(q) && !det.includes(q)) {
+                            return false;
+                          }
+                        }
+                        return true;
+                      }).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-12 text-center text-surface-400">
+                          <Clock className="w-7 h-7 mx-auto mb-2 text-surface-300" />
+                          <div className="font-semibold text-surface-600">No activity logs found</div>
+                          <div className="text-2xs text-surface-400 mt-0.5">Try widening the From / To date range or clearing your search.</div>
+                        </td>
+                      </tr>
+                    ) : (
+                      auditLogs
+                        .filter((log) => {
+                          if (logActionFilter && log.action.toLowerCase() !== logActionFilter.toLowerCase()) {
+                            return false;
+                          }
+                          if (logSearch.trim()) {
+                            const q = logSearch.toLowerCase().trim();
+                            const act = (log.action || '').toLowerCase();
+                            const ent = (log.entity_type || '').toLowerCase();
+                            const usr = (log.user_name || '').toLowerCase();
+                            const det = (log.details_json || '').toLowerCase();
+                            if (!act.includes(q) && !ent.includes(q) && !usr.includes(q) && !det.includes(q)) {
+                              return false;
+                            }
+                          }
+                          return true;
+                        })
+                        .map((log) => {
+                          let detailText = '—';
+                          if (log.details_json) {
+                            try {
+                              const d = JSON.parse(log.details_json);
+                              if (log.action === 'create' && log.entity_type === 'bill') {
+                                detailText = `Bill #${String(d.bill_number || '').padStart(5, '0')} completed • Grand Total: ${formatCurrency(d.total || 0)}`;
+                              } else if (log.action === 'return_bill' || log.entity_type === 'return') {
+                                detailText = `Refund processed: ${formatCurrency(d.refund_amount_paise || 0)} ${d.reason ? `• Reason: "${d.reason}"` : ''}`;
+                              } else if (log.action === 'void') {
+                                detailText = `Bill voided ${d.reason ? `• Reason: "${d.reason}"` : ''}`;
+                              } else if (log.entity_type === 'expense') {
+                                detailText = `Expense: ${d.title || ''} • Amount: ${formatCurrency(d.amount || 0)} ${d.reason ? `• Reason: "${d.reason}"` : ''}`;
+                              } else if (log.action === 'restock') {
+                                detailText = `Restocked +${d.quantity || 0} units (${formatCurrency(d.buying_price_paise || 0)}/unit)`;
+                              } else if (log.action === 'update' && log.entity_type === 'setting') {
+                                detailText = `System setting "${d.key || ''}" updated`;
+                              } else if (log.action === 'update' && log.entity_type === 'product') {
+                                detailText = d.name ? `Product "${d.name}" (${d.product_code || ''}) updated` : `Product #${log.entity_id || ''} details updated`;
+                              } else if (log.action === 'create' && log.entity_type === 'product') {
+                                detailText = `Product "${d.name || ''}" created • Code: ${d.product_code || ''} • Price: ${formatCurrency(d.selling_price_paise || 0)}`;
+                              } else {
+                                const parts = Object.entries(d)
+                                  .filter(([_, v]) => v !== null && v !== undefined && v !== '')
+                                  .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+                                detailText = parts.length > 0 ? parts.join(' • ') : (log.entity_id ? `ID #${log.entity_id} updated` : 'Details updated');
+                              }
+                            } catch {
+                              detailText = log.details_json || (log.entity_id ? `Record #${log.entity_id} updated` : 'Updated');
+                            }
+                          } else if (log.entity_id) {
+                            detailText = `${log.entity_type ? log.entity_type.toUpperCase() : 'Record'} #${log.entity_id} modified`;
+                          } else {
+                            detailText = 'Action completed successfully';
+                          }
+
+                          let actionBadge = (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-extrabold bg-surface-200 text-surface-900 border border-surface-300">
+                              {log.action}
+                            </span>
+                          );
+                          const act = log.action.toLowerCase();
+                          const ent = log.entity_type.toLowerCase();
+
+                          if (act === 'create' && ent === 'bill') {
+                            actionBadge = (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-extrabold bg-emerald-100 text-emerald-950 border border-emerald-400">
+                                Bill Created
+                              </span>
+                            );
+                          } else if (act === 'return_bill' || ent === 'return') {
+                            actionBadge = (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-extrabold bg-amber-100 text-amber-950 border border-amber-400">
+                                Return Item
+                              </span>
+                            );
+                          } else if (act === 'void' || act === 'cancel') {
+                            actionBadge = (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-extrabold bg-red-100 text-red-950 border border-red-400">
+                                {act === 'void' ? 'Bill Voided' : 'Cancelled'}
+                              </span>
+                            );
+                          } else if (act === 'restock' || act === 'stock_adjustment') {
+                            actionBadge = (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-extrabold bg-teal-100 text-teal-950 border border-teal-400">
+                                Stock Adjust
+                              </span>
+                            );
+                          } else if (act === 'create') {
+                            actionBadge = (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-extrabold bg-blue-100 text-blue-950 border border-blue-400">
+                                Added {log.entity_type}
+                              </span>
+                            );
+                          } else if (act === 'update') {
+                            actionBadge = (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-extrabold bg-indigo-100 text-indigo-950 border border-indigo-400">
+                                Updated {log.entity_type}
+                              </span>
+                            );
+                          } else if (act === 'delete') {
+                            actionBadge = (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-extrabold bg-rose-100 text-rose-950 border border-rose-400">
+                                Deleted {log.entity_type}
+                              </span>
+                            );
+                          } else if (act === 'login' || act === 'logout') {
+                            actionBadge = (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-2xs font-extrabold bg-purple-100 text-purple-950 border border-purple-400">
+                                {act === 'login' ? 'Login' : 'Logout'}
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <tr key={log.id} className="hover:bg-surface-50 transition-colors">
+                              <td className="py-2.5 px-3 font-mono text-surface-800 text-xs font-semibold whitespace-nowrap">
+                                {log.created_at}
+                              </td>
+                              <td className="py-2.5 px-3 whitespace-nowrap">
+                                <span className="inline-flex items-center gap-1.5 font-bold text-surface-800 text-xs">
+                                  <UserIcon className="w-3.5 h-3.5 text-surface-500 shrink-0" />
+                                  <span>{log.user_name || 'System / Admin'}</span>
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                {actionBadge}
+                              </td>
+                              <td className="py-2.5 px-3 whitespace-nowrap">
+                                <span className="px-2 py-0.5 rounded bg-surface-100 border border-surface-300 font-mono font-bold text-3xs text-surface-700 uppercase">
+                                  {log.entity_type}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-surface-800 text-xs font-medium break-words leading-relaxed">
+                                {detailText}
+                              </td>
+                            </tr>
+                          );
+                        })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
 

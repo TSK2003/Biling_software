@@ -1,8 +1,18 @@
-let globalCurrencySymbol = '₹';
+const initialSavedSymbol = typeof localStorage !== 'undefined' ? localStorage.getItem('pos_currency_symbol') : null;
+let globalCurrencySymbol = (initialSavedSymbol && initialSavedSymbol.trim()) || '₹';
 
 export function setGlobalCurrencySymbol(symbol: string) {
   if (symbol && symbol.trim()) {
-    globalCurrencySymbol = symbol.trim();
+    const clean = symbol.trim();
+    globalCurrencySymbol = clean;
+    try {
+      localStorage.setItem('pos_currency_symbol', clean);
+      if (typeof document !== 'undefined' && document.documentElement) {
+        document.documentElement.style.setProperty('--currency-symbol', `'${clean}'`);
+      }
+    } catch {
+      // ignore
+    }
   }
 }
 

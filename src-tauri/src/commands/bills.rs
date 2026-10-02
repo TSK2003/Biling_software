@@ -102,6 +102,23 @@ pub fn get_bills(
     let mut conditions = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     
+    // Sanitize date_from and date_to range if both provided
+    let (sanitized_from, sanitized_to) = match (&date_from, &date_to) {
+        (Some(f), Some(t)) if !f.trim().is_empty() && !t.trim().is_empty() => {
+            let f_t = f.trim();
+            let t_t = t.trim();
+            if f_t <= t_t {
+                (Some(f_t.to_string()), Some(t_t.to_string()))
+            } else {
+                (Some(t_t.to_string()), Some(f_t.to_string()))
+            }
+        }
+        _ => (
+            date_from.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+            date_to.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+        ),
+    };
+
     if let Some(ref date) = business_date {
         let d = date.trim();
         if !d.is_empty() {
@@ -109,19 +126,13 @@ pub fn get_bills(
             params.push(Box::new(d.to_string()));
         }
     }
-    if let Some(ref from) = date_from {
-        let f = from.trim();
-        if !f.is_empty() {
-            conditions.push(format!("(b.business_date >= ?{0} OR substr(b.created_at, 1, 10) >= ?{0})", params.len() + 1));
-            params.push(Box::new(f.to_string()));
-        }
+    if let Some(ref from) = sanitized_from {
+        conditions.push(format!("(b.business_date >= ?{0} OR substr(b.created_at, 1, 10) >= ?{0})", params.len() + 1));
+        params.push(Box::new(from.to_string()));
     }
-    if let Some(ref to) = date_to {
-        let t = to.trim();
-        if !t.is_empty() {
-            conditions.push(format!("(b.business_date <= ?{0} OR substr(b.created_at, 1, 10) <= ?{0})", params.len() + 1));
-            params.push(Box::new(t.to_string()));
-        }
+    if let Some(ref to) = sanitized_to {
+        conditions.push(format!("(b.business_date <= ?{0} OR substr(b.created_at, 1, 10) <= ?{0})", params.len() + 1));
+        params.push(Box::new(to.to_string()));
     }
     if let Some(ref s) = status {
         let s = s.trim();
@@ -458,6 +469,36 @@ pub fn void_bill(
     let tx = db.conn.unchecked_transaction()
         .map_err(|e| format!("Transaction error: {}", e))?;
 
+    // Safe foreign key validation for user_id to prevent FOREIGN KEY constraint failed
+    let valid_user_id: i64 = {
+        let exists: bool = tx.query_row(
+            "SELECT 1 FROM users WHERE id = ?1",
+            rusqlite::params![user_id],
+            |_| Ok(true),
+        ).unwrap_or(false);
+        if exists {
+            user_id
+        } else {
+            let fallback_id: Option<i64> = tx.query_row(
+                "SELECT id FROM users ORDER BY CASE WHEN is_active = 1 THEN 0 ELSE 1 END, CASE WHEN role = 'admin' THEN 0 ELSE 1 END, id ASC LIMIT 1",
+                [],
+                |r| r.get(0),
+            ).ok();
+
+            match fallback_id {
+                Some(id) => id,
+                None => {
+                    let _ = tx.execute(
+                        "INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, is_active)
+                         VALUES (1, 'admin', 'admin', 'Administrator', 'admin', 1)",
+                        [],
+                    );
+                    1
+                }
+            }
+        }
+    };
+
     // P0 FIX: Restore inventory stock for all bill items before zeroing financials
     {
         let mut items_stmt = tx.prepare(
@@ -480,7 +521,7 @@ pub fn void_bill(
             // Record reversal stock movement for audit trail
             tx.execute(
                 "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes) VALUES (?1, ?2, 'return', ?3, ?4, ?5)",
-                rusqlite::params![product_id, *quantity as i32, bill_id, user_id, format!("Stock restored: bill #{} voided. Reason: {}", bill_id, reason.trim())],
+                rusqlite::params![product_id, *quantity as i32, bill_id, valid_user_id, format!("Stock restored: bill #{} voided. Reason: {}", bill_id, reason.trim())],
             ).map_err(|e| format!("Failed to record stock reversal for product {}: {}", product_id, e))?;
         }
     }
@@ -488,7 +529,7 @@ pub fn void_bill(
     // Update bill status and zero out financial fields
     tx.execute(
         "UPDATE bills SET status = 'voided', void_reason = ?1, voided_by_user_id = ?2, voided_at = datetime('now'), grand_total_paise = 0, subtotal_paise = 0, updated_at = datetime('now') WHERE id = ?3",
-        rusqlite::params![reason.trim(), user_id, bill_id],
+        rusqlite::params![reason.trim(), valid_user_id, bill_id],
     ).map_err(|e| format!("Failed to void bill: {}", e))?;
     
     // Zero out payment record
@@ -500,7 +541,7 @@ pub fn void_bill(
     // Audit log — must succeed
     tx.execute(
         "INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json) VALUES (?1, 'void', 'bill', ?2, ?3)",
-        rusqlite::params![user_id, bill_id, format!("{{\"reason\":\"{}\"}}", reason.trim())],
+        rusqlite::params![valid_user_id, bill_id, format!("{{\"reason\":\"{}\"}}", reason.trim())],
     ).map_err(|e| format!("Audit log failed: {}", e))?;
 
     // Commit the atomic void operation

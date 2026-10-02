@@ -22,10 +22,12 @@ import { Header } from '../../components/Header';
 import { Modal } from '../../components/Modal';
 import { ReceiptPrintModal } from '../../components/ReceiptPrintModal';
 import { CustomSelect } from '../../components/CustomSelect';
+import { useSettings } from '../../contexts/SettingsContext';
 import type { DashboardStats, Bill, BillDetail } from '../../types';
 import toast from 'react-hot-toast';
 
 export const ReportsPage: React.FC = () => {
+  const { currencySymbol } = useSettings();
   const todayStr = getTodayDateString();
   const [dateFrom, setDateFrom] = useState(todayStr);
   const [dateTo, setDateTo] = useState(todayStr);
@@ -119,13 +121,13 @@ export const ReportsPage: React.FC = () => {
       // Summary KPI Section
       lines.push('"FINANCIAL SUMMARY"');
       lines.push(`"Total Bills:","${filteredTotals.count || targetBills.length}"`);
-      lines.push(`"Gross Subtotal (₹):","${((filteredTotals.subtotalPaise || stats?.total_sales_paise || 0) / 100).toFixed(2)}"`);
-      lines.push(`"Total Discounts Given (₹):","${((filteredTotals.discountPaise || stats?.total_discount_paise || 0) / 100).toFixed(2)}"`);
-      lines.push(`"Total GST Collected (₹):","${((filteredTotals.gstPaise || stats?.total_gst_paise || 0) / 100).toFixed(2)}"`);
-      lines.push(`"Net Grand Total Revenue (₹):","${((filteredTotals.grandTotalPaise || stats?.total_sales_paise || 0) / 100).toFixed(2)}"`);
-      lines.push(`"Cash Sales (₹):","${((stats?.cash_sales_paise || 0) / 100).toFixed(2)}"`);
-      lines.push(`"UPI Sales (₹):","${((stats?.upi_sales_paise || 0) / 100).toFixed(2)}"`);
-      lines.push(`"Card Sales (₹):","${((stats?.card_sales_paise || 0) / 100).toFixed(2)}"`);
+      lines.push(`"Gross Subtotal (${currencySymbol}):","${((filteredTotals.subtotalPaise || stats?.total_sales_paise || 0) / 100).toFixed(2)}"`);
+      lines.push(`"Total Discounts Given (${currencySymbol}):","${((filteredTotals.discountPaise || stats?.total_discount_paise || 0) / 100).toFixed(2)}"`);
+      lines.push(`"Total GST Collected (${currencySymbol}):","${((filteredTotals.gstPaise || stats?.total_gst_paise || 0) / 100).toFixed(2)}"`);
+      lines.push(`"Net Grand Total Revenue (${currencySymbol}):","${((filteredTotals.grandTotalPaise || stats?.total_sales_paise || 0) / 100).toFixed(2)}"`);
+      lines.push(`"Cash Sales (${currencySymbol}):","${((stats?.cash_sales_paise || 0) / 100).toFixed(2)}"`);
+      lines.push(`"UPI Sales (${currencySymbol}):","${((stats?.upi_sales_paise || 0) / 100).toFixed(2)}"`);
+      lines.push(`"Card Sales (${currencySymbol}):","${((stats?.card_sales_paise || 0) / 100).toFixed(2)}"`);
       lines.push('');
 
       // Itemized Register
@@ -136,10 +138,10 @@ export const ReportsPage: React.FC = () => {
         'Time',
         'Cashier',
         'Payment Method',
-        'Subtotal (₹)',
-        'Discount (₹)',
-        'GST Total (₹)',
-        'Grand Total (₹)',
+        `Subtotal (${currencySymbol})`,
+        `Discount (${currencySymbol})`,
+        `GST Total (${currencySymbol})`,
+        `Grand Total (${currencySymbol})`,
         'Status'
       ];
       lines.push(headers.map(h => `"${h}"`).join(','));
@@ -452,85 +454,85 @@ export const ReportsPage: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {/* Net Sales */}
           <div className="card p-3.5 bg-white border border-surface-200 rounded-xl shadow-xs">
-            <div className="flex items-center justify-between text-2xs text-surface-500 uppercase font-bold tracking-wider">
+            <div className="flex items-center justify-between text-xs text-surface-600 uppercase font-bold tracking-wider">
               <span>Net Revenue</span>
-              <TrendingUp className="w-3.5 h-3.5 text-emerald-600" />
+              <TrendingUp className="w-4 h-4 text-emerald-800" />
             </div>
-            <div className="text-xl font-bold font-mono text-emerald-700 mt-1">
+            <div className="text-xl font-black font-mono text-emerald-950 mt-1">
               {formatCurrency(stats?.total_sales_paise || 0)}
             </div>
-            <div className="text-[11px] text-surface-400 mt-0.5">
-              Net realized sales income
+            <div className="text-xs text-surface-600 mt-0.5 font-medium">
+              Net realized sales
             </div>
           </div>
 
           {/* Bills Count */}
           <div className="card p-3.5 bg-white border border-surface-200 rounded-xl shadow-xs">
-            <div className="flex items-center justify-between text-2xs text-surface-500 uppercase font-bold tracking-wider">
+            <div className="flex items-center justify-between text-xs text-surface-600 uppercase font-bold tracking-wider">
               <span>Total Bills</span>
-              <Receipt className="w-3.5 h-3.5 text-primary-600" />
+              <Receipt className="w-4 h-4 text-primary-800" />
             </div>
-            <div className="text-xl font-bold font-mono text-surface-900 mt-1">
+            <div className="text-xl font-black font-mono text-surface-950 mt-1">
               {stats?.total_bills || 0}
             </div>
-            <div className="text-[11px] text-surface-400 mt-0.5">
-              Transactions processed
+            <div className="text-xs text-surface-600 mt-0.5 font-medium">
+              Transactions
             </div>
           </div>
 
           {/* Items Sold */}
           <div className="card p-3.5 bg-white border border-surface-200 rounded-xl shadow-xs">
-            <div className="flex items-center justify-between text-2xs text-surface-500 uppercase font-bold tracking-wider">
+            <div className="flex items-center justify-between text-xs text-surface-600 uppercase font-bold tracking-wider">
               <span>Items Sold</span>
-              <ShoppingBag className="w-3.5 h-3.5 text-indigo-600" />
+              <ShoppingBag className="w-4 h-4 text-indigo-800" />
             </div>
-            <div className="text-xl font-bold font-mono text-surface-900 mt-1">
+            <div className="text-xl font-black font-mono text-surface-950 mt-1">
               {stats?.total_items_sold || 0}
             </div>
-            <div className="text-[11px] text-surface-400 mt-0.5">
+            <div className="text-xs text-surface-600 mt-0.5 font-medium">
               Units across all bills
             </div>
           </div>
 
           {/* GST Total */}
           <div className="card p-3.5 bg-white border border-surface-200 rounded-xl shadow-xs">
-            <div className="flex items-center justify-between text-2xs text-surface-500 uppercase font-bold tracking-wider">
+            <div className="flex items-center justify-between text-xs text-surface-600 uppercase font-bold tracking-wider">
               <span>GST / Taxes</span>
-              <Percent className="w-3.5 h-3.5 text-blue-600" />
+              <Percent className="w-4 h-4 text-blue-800" />
             </div>
-            <div className="text-xl font-bold font-mono text-blue-700 mt-1">
+            <div className="text-xl font-black font-mono text-blue-950 mt-1">
               {formatCurrency(stats?.total_gst_paise || 0)}
             </div>
-            <div className="text-[11px] text-surface-400 mt-0.5">
+            <div className="text-xs text-surface-600 mt-0.5 font-medium">
               Tax output collected
             </div>
           </div>
 
           {/* Discounts */}
           <div className="card p-3.5 bg-white border border-surface-200 rounded-xl shadow-xs">
-            <div className="flex items-center justify-between text-2xs text-surface-500 uppercase font-bold tracking-wider">
+            <div className="flex items-center justify-between text-xs text-surface-600 uppercase font-bold tracking-wider">
               <span>Discounts</span>
-              <Tag className="w-3.5 h-3.5 text-amber-600" />
+              <Tag className="w-4 h-4 text-amber-800" />
             </div>
-            <div className="text-xl font-bold font-mono text-amber-700 mt-1">
+            <div className="text-xl font-black font-mono text-amber-950 mt-1">
               {formatCurrency(stats?.total_discount_paise || 0)}
             </div>
-            <div className="text-[11px] text-surface-400 mt-0.5">
+            <div className="text-xs text-surface-600 mt-0.5 font-medium">
               Discounts granted
             </div>
           </div>
 
-          {/* Average Order Value */}
+          {/* Avg Bill */}
           <div className="card p-3.5 bg-white border border-surface-200 rounded-xl shadow-xs">
-            <div className="flex items-center justify-between text-2xs text-surface-500 uppercase font-bold tracking-wider">
-              <span>Avg Order</span>
-              <TrendingUp className="w-3.5 h-3.5 text-purple-600" />
+            <div className="flex items-center justify-between text-xs text-surface-600 uppercase font-bold tracking-wider">
+              <span>Avg Bill</span>
+              <Banknote className="w-4 h-4 text-primary-800" />
             </div>
-            <div className="text-xl font-bold font-mono text-surface-900 mt-1">
+            <div className="text-xl font-black font-mono text-surface-950 mt-1">
               {formatCurrency(stats?.avg_bill_paise || 0)}
             </div>
-            <div className="text-[11px] text-surface-400 mt-0.5">
-              Per completed bill
+            <div className="text-xs text-surface-600 mt-0.5 font-medium">
+              Average ticket size
             </div>
           </div>
         </div>
@@ -540,17 +542,17 @@ export const ReportsPage: React.FC = () => {
           {/* Cash */}
           <div className="card p-3 bg-white border border-surface-200 rounded-xl flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-200 flex-shrink-0">
+              <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-950 flex items-center justify-center border border-emerald-300 flex-shrink-0 shadow-2xs">
                 <Banknote className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-2xs uppercase font-bold text-surface-500">Cash Received</div>
-                <div className="text-base font-bold font-mono text-surface-900">
+                <div className="text-xs uppercase font-bold text-surface-600">Cash Received</div>
+                <div className="text-base font-bold font-mono text-surface-950">
                   {formatCurrency(stats?.cash_sales_paise || 0)}
                 </div>
               </div>
             </div>
-            <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-surface-100 text-surface-600">
+            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded bg-surface-100 text-surface-800 border border-surface-200">
               {stats?.total_sales_paise
                 ? `${Math.round(((stats.cash_sales_paise || 0) / stats.total_sales_paise) * 100)}%`
                 : '0%'}
@@ -560,17 +562,17 @@ export const ReportsPage: React.FC = () => {
           {/* UPI */}
           <div className="card p-3 bg-white border border-surface-200 rounded-xl flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-lg bg-purple-50 text-purple-700 flex items-center justify-center border border-purple-200 flex-shrink-0">
+              <div className="w-10 h-10 rounded-lg bg-purple-100 text-purple-950 flex items-center justify-center border border-purple-300 flex-shrink-0 shadow-2xs">
                 <QrCode className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-2xs uppercase font-bold text-surface-500">UPI / QR Digital</div>
-                <div className="text-base font-bold font-mono text-surface-900">
+                <div className="text-xs uppercase font-bold text-surface-600">UPI / QR Digital</div>
+                <div className="text-base font-bold font-mono text-surface-950">
                   {formatCurrency(stats?.upi_sales_paise || 0)}
                 </div>
               </div>
             </div>
-            <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-surface-100 text-surface-600">
+            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded bg-surface-100 text-surface-800 border border-surface-200">
               {stats?.total_sales_paise
                 ? `${Math.round(((stats.upi_sales_paise || 0) / stats.total_sales_paise) * 100)}%`
                 : '0%'}
@@ -580,17 +582,17 @@ export const ReportsPage: React.FC = () => {
           {/* Card */}
           <div className="card p-3 bg-white border border-surface-200 rounded-xl flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-200 flex-shrink-0">
+              <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-950 flex items-center justify-center border border-blue-300 flex-shrink-0 shadow-2xs">
                 <CreditCard className="w-5 h-5" />
               </div>
               <div>
-                <div className="text-2xs uppercase font-bold text-surface-500">Card Payments</div>
-                <div className="text-base font-bold font-mono text-surface-900">
+                <div className="text-xs uppercase font-bold text-surface-600">Card Payments</div>
+                <div className="text-base font-bold font-mono text-surface-950">
                   {formatCurrency(stats?.card_sales_paise || 0)}
                 </div>
               </div>
             </div>
-            <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-surface-100 text-surface-600">
+            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded bg-surface-100 text-surface-800 border border-surface-200">
               {stats?.total_sales_paise
                 ? `${Math.round(((stats.card_sales_paise || 0) / stats.total_sales_paise) * 100)}%`
                 : '0%'}
@@ -719,7 +721,7 @@ export const ReportsPage: React.FC = () => {
                       {formatCurrency(filteredTotals.subtotalPaise)}
                     </td>
                     <td className="font-mono text-right text-red-600 px-4 py-3">
-                      {filteredTotals.discountPaise > 0 ? `-${formatCurrency(filteredTotals.discountPaise)}` : '₹0.00'}
+                      {filteredTotals.discountPaise > 0 ? `-${formatCurrency(filteredTotals.discountPaise)}` : formatCurrency(0)}
                     </td>
                     <td className="font-mono text-right text-surface-700 px-4 py-3">
                       {formatCurrency(filteredTotals.gstPaise)}

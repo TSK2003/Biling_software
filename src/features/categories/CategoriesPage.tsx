@@ -316,16 +316,13 @@ export const CategoriesPage: React.FC = () => {
         )}
 
         {/* Category Order Hint */}
-        <div className="flex items-center justify-between text-xs text-surface-600 px-1 py-1">
+        <div className="flex items-center justify-between text-xs text-surface-700 px-1 py-1">
           <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-primary-600 flex-shrink-0" />
+            <Info className="w-4 h-4 text-primary-800 flex-shrink-0" />
             <span>
-              <strong>Tip:</strong> Drag the dots handle (<GripVertical className="w-3.5 h-3.5 inline text-surface-500" />) to move, click dots to select, or use ▲ / ▼ to place categories in exact order (#1, #2...).
+              <strong className="text-surface-900">Tip:</strong> Drag the dots handle (<GripVertical className="w-3.5 h-3.5 inline text-surface-600" />) to move, click dots to select, or use ▲ / ▼ to place categories in exact order (#1, #2...).
             </span>
           </div>
-          <span className="font-mono text-xs font-semibold text-surface-500">
-            Showing {filteredCategories.length} of {categories.length} categories
-          </span>
         </div>
 
         {/* Categories Table */}
@@ -503,8 +500,8 @@ export const CategoriesPage: React.FC = () => {
                           <span
                             className={`badge text-2xs font-bold px-2.5 py-0.5 ${
                               prodCount > 0
-                                ? 'bg-primary-50 text-primary-700 border border-primary-200'
-                                : 'bg-surface-100 text-surface-500 border border-surface-200'
+                                ? 'bg-blue-100 text-blue-950 border border-blue-300'
+                                : 'bg-surface-100 text-surface-600 border border-surface-200'
                             }`}
                           >
                             {prodCount} {prodCount === 1 ? 'Product' : 'Products'}
@@ -527,10 +524,10 @@ export const CategoriesPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleOpenEdit(c)}
-                              className="btn-secondary btn-sm flex items-center gap-1 text-2xs py-1 px-2 text-primary-700 hover:bg-primary-50 cursor-pointer"
+                              className="btn-table-edit"
                               title="Edit category"
                             >
-                              <Edit2 className="w-3 h-3 text-primary-600" />
+                              <Edit2 className="w-3 h-3 text-blue-700" />
                               <span>Edit</span>
                             </button>
 
@@ -538,11 +535,7 @@ export const CategoriesPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleToggleActive(c)}
-                              className={`btn-sm flex items-center gap-1 text-2xs py-1 px-2 rounded border transition-colors cursor-pointer ${
-                                c.is_active
-                                  ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                                  : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                              }`}
+                              className={c.is_active ? 'btn-table-deactivate' : 'btn-table-activate'}
                               title={c.is_active ? 'Deactivate this category' : 'Activate this category'}
                             >
                               <Power className="w-3 h-3" />
@@ -553,10 +546,10 @@ export const CategoriesPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => setDeletingCategory(c)}
-                              className="btn-sm flex items-center gap-1 text-2xs py-1 px-2 rounded border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors cursor-pointer"
+                              className="btn-table-delete"
                               title="Delete category"
                             >
-                              <Trash2 className="w-3 h-3 text-red-600" />
+                              <Trash2 className="w-3 h-3 text-red-700" />
                               <span>Delete</span>
                             </button>
                           </div>

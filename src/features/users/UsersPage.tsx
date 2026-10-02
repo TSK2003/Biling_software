@@ -371,10 +371,10 @@ export const UsersPage: React.FC = () => {
                         {/* 2. Role / Position */}
                         <td className="px-4 py-3.5">
                           <span
-                            className={`inline-flex items-center px-2.5 py-0.5 text-2xs font-semibold rounded-md border capitalize ${
+                            className={`inline-flex items-center px-2.5 py-0.5 text-2xs font-bold rounded-md border capitalize ${
                               u.role.toLowerCase() === 'admin'
-                                ? 'bg-primary-50 text-primary-700 border-primary-200'
-                                : 'bg-surface-100 text-surface-700 border-surface-200'
+                                ? 'bg-primary-100 text-primary-950 border-primary-300'
+                                : 'bg-surface-100 text-surface-800 border-surface-300'
                             }`}
                           >
                             {u.role.replace('_', ' ')}
@@ -384,15 +384,15 @@ export const UsersPage: React.FC = () => {
                         {/* 4. Screen Checkpoints Badge */}
                         <td className="px-4 py-3.5">
                           {isFullAdmin ? (
-                            <span className="inline-flex items-center text-2xs font-semibold px-2.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <span className="inline-flex items-center text-2xs font-bold px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-950 border border-emerald-400">
                               Full Admin Access
                             </span>
                           ) : (
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-2xs font-mono font-semibold px-2 py-0.5 rounded-md bg-primary-50 text-primary-700 border border-primary-200">
+                              <span className="text-2xs font-mono font-bold px-2 py-0.5 rounded-md bg-primary-100 text-primary-950 border border-primary-300">
                                 {perms.length} / {ALL_SCREENS.length} Screens
                               </span>
-                              <span className="text-2xs text-surface-500 truncate max-w-[120px]">
+                              <span className="text-2xs text-surface-600 font-medium truncate max-w-[120px]">
                                 ({perms.slice(0, 2).join(', ')}{perms.length > 2 ? ` +${perms.length - 2}` : ''})
                               </span>
                             </div>
@@ -400,18 +400,18 @@ export const UsersPage: React.FC = () => {
                         </td>
 
                         {/* 5. Max Discount */}
-                        <td className="px-3 py-3.5 text-center font-mono text-xs font-semibold text-surface-700">
+                        <td className="px-3 py-3.5 text-center font-mono text-xs font-bold text-surface-900">
                           {u.max_discount_pct}%
                         </td>
 
                         {/* 6. Status */}
                         <td className="px-3 py-3.5 text-center">
                           {u.is_active ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 text-2xs font-semibold rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <span className="inline-flex items-center px-2.5 py-0.5 text-2xs font-bold rounded-md bg-emerald-100 text-emerald-950 border border-emerald-400">
                               Active
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2.5 py-0.5 text-2xs font-semibold rounded-md bg-red-50 text-red-700 border border-red-200">
+                            <span className="inline-flex items-center px-2.5 py-0.5 text-2xs font-bold rounded-md bg-red-100 text-red-950 border border-red-400">
                               Inactive
                             </span>
                           )}
@@ -424,10 +424,10 @@ export const UsersPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleOpenEdit(u)}
-                              className="h-7 px-2.5 text-2xs font-semibold bg-white hover:bg-surface-50 text-primary-700 border border-surface-300 rounded-md transition-colors inline-flex items-center gap-1 cursor-pointer"
+                              className="btn-table-edit"
                               title="Edit user details & permissions"
                             >
-                              <Edit2 className="w-3 h-3 text-primary-600" />
+                              <Edit2 className="w-3 h-3 text-blue-700" />
                               <span>Edit</span>
                             </button>
 
@@ -437,11 +437,7 @@ export const UsersPage: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => handleToggleActive(u)}
-                                  className={`h-7 px-2.5 text-2xs font-semibold rounded-md border transition-colors inline-flex items-center gap-1 cursor-pointer ${
-                                    u.is_active
-                                      ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                                      : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                                  }`}
+                                  className={u.is_active ? 'btn-table-deactivate' : 'btn-table-activate'}
                                   title={u.is_active ? 'Deactivate this user' : 'Activate this user'}
                                 >
                                   <Power className="w-3 h-3" />
@@ -452,15 +448,15 @@ export const UsersPage: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => setDeletingUser(u)}
-                                  className="h-7 px-2.5 text-2xs font-semibold rounded-md border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                                  className="btn-table-delete"
                                   title="Delete user account"
                                 >
-                                  <Trash2 className="w-3 h-3 text-red-600" />
+                                  <Trash2 className="w-3 h-3 text-red-700" />
                                   <span>Delete</span>
                                 </button>
                               </>
                             ) : (
-                              <span className="text-2xs text-surface-500 font-semibold px-2 py-1 bg-surface-100 rounded-md border border-surface-200">
+                              <span className="text-2xs text-surface-700 font-bold px-2 py-1 bg-surface-100 rounded-md border border-surface-300">
                                 Permanent Admin
                               </span>
                             )}

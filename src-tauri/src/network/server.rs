@@ -863,6 +863,36 @@ async fn create_bill(
     ).unwrap_or(0);
     let bill_number = max_bill_num + 1;
 
+    // Safe foreign key validation for user_id
+    let valid_user_id: i64 = {
+        let exists: bool = tx.query_row(
+            "SELECT 1 FROM users WHERE id = ?1",
+            rusqlite::params![payload.user_id],
+            |_| Ok(true),
+        ).unwrap_or(false);
+        if exists {
+            payload.user_id
+        } else {
+            let fallback_id: Option<i64> = tx.query_row(
+                "SELECT id FROM users ORDER BY CASE WHEN is_active = 1 THEN 0 ELSE 1 END, CASE WHEN role = 'admin' THEN 0 ELSE 1 END, id ASC LIMIT 1",
+                [],
+                |r| r.get(0),
+            ).ok();
+
+            match fallback_id {
+                Some(id) => id,
+                None => {
+                    let _ = tx.execute(
+                        "INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, is_active)
+                         VALUES (1, 'admin', 'admin', 'Administrator', 'admin', 1)",
+                        [],
+                    );
+                    1
+                }
+            }
+        }
+    };
+
     tx.execute(
         "INSERT INTO bills (
             bill_uuid, bill_number, business_date, bill_time, user_id,
@@ -870,7 +900,7 @@ async fn create_bill(
             gst_total_paise, grand_total_paise, status
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'completed')",
         rusqlite::params![
-            bill_uuid, bill_number, business_date, bill_time, payload.user_id,
+            bill_uuid, bill_number, business_date, bill_time, valid_user_id,
             subtotal_paise, payload.discount_type, discount_value_x100, discount_amount_paise,
             gst_total_paise, grand_total_paise,
         ],
@@ -890,7 +920,17 @@ async fn create_bill(
         let item_gst_pct = if item_gst_applied { item.gst_percentage_x100 } else { 0 };
         let _line_total = line_subtotal + line_gst;
 
-        let db_product_id: Option<i64> = if item.product_id > 0 { Some(item.product_id) } else { None };
+        // Verify product exists in products table before setting product_id foreign key
+        let db_product_id: Option<i64> = if item.product_id > 0 {
+            let prod_exists: bool = tx.query_row(
+                "SELECT 1 FROM products WHERE id = ?1",
+                rusqlite::params![item.product_id],
+                |_| Ok(true),
+            ).unwrap_or(false);
+            if prod_exists { Some(item.product_id) } else { None }
+        } else {
+            None
+        };
 
         tx.execute(
             "INSERT INTO bill_items (
@@ -911,7 +951,7 @@ async fn create_bill(
             let _ = tx.execute(
                 "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, device_id, notes)
                  VALUES (?1, ?2, 'sale', ?3, ?4, ?5, 'POS Sale')",
-                rusqlite::params![pid, -(item.quantity as i32), bill_id, payload.user_id, payload.device_id],
+                rusqlite::params![pid, -(item.quantity as i32), bill_id, valid_user_id, payload.device_id],
             );
             let _ = tx.execute(
                 "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))

@@ -38,6 +38,7 @@ import type {
   BackupRecord,
   AwsBackupResponse,
   AutoBackupStatus,
+  AuditLog,
 } from '../types';
 
 // ============================================================
@@ -284,6 +285,13 @@ export const api = {
   getSetting: (key: string) => invoke<string>('get_setting', { key }),
   updateSetting: (key: string, value: string) =>
     invoke<void>('update_setting', { key, value }),
+  getAuditLogs: (params?: { dateFrom?: string; dateTo?: string; search?: string; limit?: number }) =>
+    invoke<AuditLog[]>('get_audit_logs', {
+      dateFrom: params?.dateFrom,
+      dateTo: params?.dateTo,
+      search: params?.search,
+      limit: params?.limit,
+    }),
 
   // Users
   getUsers: () => invoke<User[]>('get_users'),

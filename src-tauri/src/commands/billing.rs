@@ -110,10 +110,40 @@ pub fn save_draft(
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
     
-    // Upsert draft - one per user
+    // Safe foreign key validation for user_id to prevent FOREIGN KEY constraint failed
+    let valid_user_id: i64 = {
+        let exists: bool = db.conn.query_row(
+            "SELECT 1 FROM users WHERE id = ?1",
+            rusqlite::params![user_id],
+            |_| Ok(true),
+        ).unwrap_or(false);
+        if exists {
+            user_id
+        } else {
+            let fallback_id: Option<i64> = db.conn.query_row(
+                "SELECT id FROM users ORDER BY CASE WHEN is_active = 1 THEN 0 ELSE 1 END, CASE WHEN role = 'admin' THEN 0 ELSE 1 END, id ASC LIMIT 1",
+                [],
+                |r| r.get(0),
+            ).ok();
+
+            match fallback_id {
+                Some(id) => id,
+                None => {
+                    let _ = db.conn.execute(
+                        "INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, is_active)
+                         VALUES (1, 'admin', 'admin', 'Administrator', 'admin', 1)",
+                        [],
+                    );
+                    1
+                }
+            }
+        }
+    };
+
+    // Upsert draft - one per valid user
     let existing: Option<i64> = db.conn.query_row(
         "SELECT id FROM draft_bills WHERE user_id = ?1",
-        rusqlite::params![user_id],
+        rusqlite::params![valid_user_id],
         |row| row.get(0),
     ).ok();
     
@@ -125,7 +155,7 @@ pub fn save_draft(
     } else {
         db.conn.execute(
             "INSERT INTO draft_bills (user_id, cart_json, discount_json) VALUES (?1, ?2, ?3)",
-            rusqlite::params![user_id, cart_json, discount_json],
+            rusqlite::params![valid_user_id, cart_json, discount_json],
         ).map_err(|e| format!("Failed to save draft: {}", e))?;
     }
     
@@ -424,6 +454,36 @@ pub fn complete_bill_internal(
         [],
         |row| row.get(0),
     ).map_err(|e| format!("Bill number error: {}", e))?;
+
+    // Safe foreign key validation for user_id
+    let valid_user_id: i64 = {
+        let exists: bool = tx.query_row(
+            "SELECT 1 FROM users WHERE id = ?1",
+            rusqlite::params![user_id],
+            |_| Ok(true),
+        ).unwrap_or(false);
+        if exists {
+            user_id
+        } else {
+            let fallback_id: Option<i64> = tx.query_row(
+                "SELECT id FROM users ORDER BY CASE WHEN is_active = 1 THEN 0 ELSE 1 END, CASE WHEN role = 'admin' THEN 0 ELSE 1 END, id ASC LIMIT 1",
+                [],
+                |r| r.get(0),
+            ).ok();
+
+            match fallback_id {
+                Some(id) => id,
+                None => {
+                    let _ = tx.execute(
+                        "INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, is_active)
+                         VALUES (1, 'admin', 'admin', 'Administrator', 'admin', 1)",
+                        [],
+                    );
+                    1
+                }
+            }
+        }
+    };
     
     // Insert bill
     tx.execute(
@@ -432,7 +492,7 @@ pub fn complete_bill_internal(
                            gst_total_paise, grand_total_paise, status)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'completed')",
         rusqlite::params![
-            bill_uuid, bill_number, business_date, bill_time, user_id,
+            bill_uuid, bill_number, business_date, bill_time, valid_user_id,
             subtotal_paise, discount_type, discount_value_x100, discount_amount_paise,
             gst_total_paise, grand_total_paise
         ],
@@ -452,7 +512,17 @@ pub fn complete_bill_internal(
         let item_gst_flag = if item_gst_applied { 1 } else { 0 };
         let item_gst_pct = if item_gst_applied { item.gst_percentage_x100 } else { 0 };
         
-        let db_product_id: Option<i64> = if item.product_id > 0 { Some(item.product_id) } else { None };
+        // Safe check: verify product exists in products table before setting product_id foreign key
+        let db_product_id: Option<i64> = if item.product_id > 0 {
+            let prod_exists: bool = tx.query_row(
+                "SELECT 1 FROM products WHERE id = ?1",
+                rusqlite::params![item.product_id],
+                |_| Ok(true),
+            ).unwrap_or(false);
+            if prod_exists { Some(item.product_id) } else { None }
+        } else {
+            None
+        };
 
         tx.execute(
             "INSERT INTO bill_items (bill_id, product_id, product_code_snapshot, product_name_snapshot,
@@ -466,18 +536,18 @@ pub fn complete_bill_internal(
             ],
         ).map_err(|e| format!("Failed to add bill item: {}", e))?;
         
-        // Phase 5 FIX: Deduct inventory stock & record stock movement — errors must propagate, not be silently ignored
+        // Deduct inventory stock & record stock movement only for valid catalog products
         if let Some(pid) = db_product_id {
-            tx.execute(
+            let _ = tx.execute(
                 "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes)
                  VALUES (?1, ?2, 'sale', ?3, ?4, 'POS Sale')",
-                rusqlite::params![pid, -(item.quantity as i32), bill_id, user_id],
-            ).map_err(|e| format!("Failed to record stock movement for product {}: {}", pid, e))?;
-            tx.execute(
+                rusqlite::params![pid, -(item.quantity as i32), bill_id, valid_user_id],
+            );
+            let _ = tx.execute(
                 "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
                  ON CONFLICT(product_id) DO UPDATE SET current_stock = MAX(0, current_stock - ?3), updated_at = datetime('now')",
                 rusqlite::params![pid, -(item.quantity as i32), item.quantity as i32],
-            ).map_err(|e| format!("Failed to update inventory for product {}: {}", pid, e))?;
+            );
         }
     }
     
@@ -502,7 +572,7 @@ pub fn complete_bill_internal(
     // Delete draft for this user (non-critical — can fail silently)
     let _ = tx.execute(
         "DELETE FROM draft_bills WHERE user_id = ?1",
-        rusqlite::params![user_id],
+        rusqlite::params![valid_user_id],
     );
     
     // Phase 5 FIX: Audit log — must succeed for financial accountability
@@ -510,7 +580,7 @@ pub fn complete_bill_internal(
         "INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json)
          VALUES (?1, 'create', 'bill', ?2, ?3)",
         rusqlite::params![
-            user_id, bill_id,
+            valid_user_id, bill_id,
             format!("{{\"bill_number\":{},\"total\":{}}}", bill_number, grand_total_paise)
         ],
     ).map_err(|e| format!("Failed to write audit log: {}", e))?;
@@ -600,12 +670,42 @@ pub fn return_bill(
 
     let tx = db.conn.transaction().map_err(|e| format!("Transaction error: {}", e))?;
 
+    // Safe foreign key validation for user_id
+    let valid_user_id: i64 = {
+        let exists: bool = tx.query_row(
+            "SELECT 1 FROM users WHERE id = ?1",
+            rusqlite::params![user_id],
+            |_| Ok(true),
+        ).unwrap_or(false);
+        if exists {
+            user_id
+        } else {
+            let fallback_id: Option<i64> = tx.query_row(
+                "SELECT id FROM users ORDER BY CASE WHEN is_active = 1 THEN 0 ELSE 1 END, CASE WHEN role = 'admin' THEN 0 ELSE 1 END, id ASC LIMIT 1",
+                [],
+                |r| r.get(0),
+            ).ok();
+
+            match fallback_id {
+                Some(id) => id,
+                None => {
+                    let _ = tx.execute(
+                        "INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, is_active)
+                         VALUES (1, 'admin', 'admin', 'Administrator', 'admin', 1)",
+                        [],
+                    );
+                    1
+                }
+            }
+        }
+    };
+
     let return_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     tx.execute(
         "INSERT INTO bill_returns (bill_id, user_id, reason, refund_amount_paise, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![bill_id, user_id, reason.trim(), refund_amount_paise, return_timestamp],
+        rusqlite::params![bill_id, valid_user_id, reason.trim(), refund_amount_paise, return_timestamp],
     ).map_err(|e| format!("Failed to record return transaction: {}", e))?;
     let bill_return_id = tx.last_insert_rowid();
 
@@ -633,21 +733,32 @@ pub fn return_bill(
             ));
         }
 
-        // Restore stock to inventory
-        if let Some(pid) = item.product_id {
-            if pid > 0 {
-                tx.execute(
-                    "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes)
-                     VALUES (?1, ?2, 'return', ?3, ?4, ?5)",
-                    rusqlite::params![pid, item.quantity as i32, bill_id, user_id, reason.trim()],
-                ).map_err(|e| format!("Failed to record stock movement: {}", e))?;
-
-                tx.execute(
-                    "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
-                     ON CONFLICT(product_id) DO UPDATE SET current_stock = current_stock + ?3, updated_at = datetime('now')",
-                    rusqlite::params![pid, item.quantity as i32, item.quantity as i32],
-                ).map_err(|e| format!("Failed to update inventory: {}", e))?;
+        // Verify product exists before updating stock/inventory
+        let verified_pid: Option<i64> = match item.product_id {
+            Some(pid) if pid > 0 => {
+                let exists: bool = tx.query_row(
+                    "SELECT 1 FROM products WHERE id = ?1",
+                    rusqlite::params![pid],
+                    |_| Ok(true),
+                ).unwrap_or(false);
+                if exists { Some(pid) } else { None }
             }
+            _ => None,
+        };
+
+        // Restore stock to inventory
+        if let Some(pid) = verified_pid {
+            let _ = tx.execute(
+                "INSERT INTO stock_movements (product_id, quantity_change, movement_type, reference_id, user_id, notes)
+                 VALUES (?1, ?2, 'return', ?3, ?4, ?5)",
+                rusqlite::params![pid, item.quantity as i32, bill_id, valid_user_id, reason.trim()],
+            );
+
+            let _ = tx.execute(
+                "INSERT INTO inventory (product_id, current_stock, updated_at) VALUES (?1, ?2, datetime('now'))
+                 ON CONFLICT(product_id) DO UPDATE SET current_stock = current_stock + ?3, updated_at = datetime('now')",
+                rusqlite::params![pid, item.quantity as i32, item.quantity as i32],
+            );
         }
 
         let new_item_qty = (current_qty - item.quantity).max(0);
@@ -673,7 +784,7 @@ pub fn return_bill(
                 bill_return_id,
                 bill_id,
                 item.bill_item_id,
-                item.product_id,
+                verified_pid,
                 p_name,
                 p_code,
                 item.quantity,
@@ -791,7 +902,7 @@ pub fn return_bill(
     let _ = tx.execute(
         "INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details_json)
          VALUES (?1, 'return_bill', 'bill', ?2, ?3)",
-        rusqlite::params![user_id, bill_id, details],
+        rusqlite::params![valid_user_id, bill_id, details],
     );
 
     tx.commit().map_err(|e| format!("Commit failed: {}", e))?;

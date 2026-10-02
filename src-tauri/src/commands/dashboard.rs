@@ -11,6 +11,21 @@ pub fn get_dashboard_stats(
     crate::commands::auth::require_screen_access("dashboard")?;
     let db = state.db.lock().map_err(|_| "Database lock failed".to_string())?;
 
+    // Sanitize dates so date_from <= date_to
+    let (d_from, d_to) = {
+        let f = date_from.trim();
+        let t = date_to.trim();
+        if !f.is_empty() && !t.is_empty() {
+            if f <= t {
+                (f.to_string(), t.to_string())
+            } else {
+                (t.to_string(), f.to_string())
+            }
+        } else {
+            (f.to_string(), t.to_string())
+        }
+    };
+
     // If in Client mode, fetch dashboard stats from Host PC
     if let Some((host_ip, host_port)) = crate::network::client::get_client_mode_host(&db.conn) {
         let client = reqwest::blocking::Client::builder()
@@ -20,7 +35,7 @@ pub fn get_dashboard_stats(
 
         let url = format!("http://{}:{}/api/dashboard/stats", host_ip, host_port);
         let resp = client.get(&url)
-            .query(&[("date_from", &date_from), ("date_to", &date_to)])
+            .query(&[("date_from", &d_from), ("date_to", &d_to)])
             .send()
             .map_err(|e| format!("Cannot reach Shop Main Computer at {}: {}", host_ip, e))?;
 
@@ -67,7 +82,7 @@ pub fn get_dashboard_stats(
          WHERE b.status IN ('completed', 'returned')
            AND ((b.business_date >= ?1 AND b.business_date <= ?2)
                 OR (substr(b.created_at, 1, 10) >= ?1 AND substr(b.created_at, 1, 10) <= ?2))",
-        rusqlite::params![date_from, date_to],
+        rusqlite::params![d_from, d_to],
         |row| {
             let total_sales: i64 = row.get(0)?;
             let total_bills: i64 = row.get(1)?;
@@ -95,7 +110,7 @@ pub fn get_dashboard_stats(
          WHERE b.status IN ('completed', 'returned')
            AND ((b.business_date >= ?1 AND b.business_date <= ?2)
                 OR (substr(b.created_at, 1, 10) >= ?1 AND substr(b.created_at, 1, 10) <= ?2))",
-        rusqlite::params![date_from, date_to],
+        rusqlite::params![d_from, d_to],
         |row| row.get(0),
     ).unwrap_or(0);
 
@@ -106,7 +121,7 @@ pub fn get_dashboard_stats(
          WHERE status = 'active'
            AND ((expense_date >= ?1 AND expense_date <= ?2)
                 OR (substr(created_at, 1, 10) >= ?1 AND substr(created_at, 1, 10) <= ?2))",
-        rusqlite::params![date_from, date_to],
+        rusqlite::params![d_from, d_to],
         |row| row.get(0),
     ).unwrap_or(0);
 

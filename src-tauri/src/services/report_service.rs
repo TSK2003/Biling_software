@@ -153,38 +153,54 @@ impl ReportService {
         };
         worksheet.write_with_format(1, 0, subtitle, &subtitle_format).map_err(|e| e.to_string())?;
 
+        // Query configured currency symbol
+        let currency_sym: String = db.conn.query_row(
+            "SELECT value FROM settings WHERE key = 'currency_symbol'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or_else(|_| "₹".to_string());
+
         // 2. Write Summary Cards Section
         worksheet.write_with_format(3, 0, "EXECUTIVE SUMMARY", &summary_header_format).map_err(|e| e.to_string())?;
         worksheet.write_with_format(3, 1, "VALUE", &summary_header_format).map_err(|e| e.to_string())?;
 
         let summary_metrics = [
-            ("Total Bills Completed", format!("{}", summary.total_bills)),
-            ("Total Items Sold", format!("{}", summary.total_items)),
-            ("Gross Sales", format!("₹{:.2}", summary.gross_sales_paise as f64 / 100.0)),
-            ("Total Discounts Given", format!("₹{:.2}", summary.total_discount_paise as f64 / 100.0)),
-            ("Total GST Collected", format!("₹{:.2}", summary.total_gst_paise as f64 / 100.0)),
-            ("Net Total Revenue", format!("₹{:.2}", summary.net_sales_paise as f64 / 100.0)),
-            ("Cash Revenue", format!("₹{:.2}", summary.cash_paise as f64 / 100.0)),
-            ("UPI Revenue", format!("₹{:.2}", summary.upi_paise as f64 / 100.0)),
-            ("Card Revenue", format!("₹{:.2}", summary.card_paise as f64 / 100.0)),
+            ("Total Bills Completed".to_string(), format!("{}", summary.total_bills)),
+            ("Total Items Sold".to_string(), format!("{}", summary.total_items)),
+            ("Gross Sales".to_string(), format!("{}{:.2}", currency_sym, summary.gross_sales_paise as f64 / 100.0)),
+            ("Total Discounts Given".to_string(), format!("{}{:.2}", currency_sym, summary.total_discount_paise as f64 / 100.0)),
+            ("Total GST Collected".to_string(), format!("{}{:.2}", currency_sym, summary.total_gst_paise as f64 / 100.0)),
+            ("Net Total Revenue".to_string(), format!("{}{:.2}", currency_sym, summary.net_sales_paise as f64 / 100.0)),
+            ("Cash Revenue".to_string(), format!("{}{:.2}", currency_sym, summary.cash_paise as f64 / 100.0)),
+            ("UPI Revenue".to_string(), format!("{}{:.2}", currency_sym, summary.upi_paise as f64 / 100.0)),
+            ("Card Revenue".to_string(), format!("{}{:.2}", currency_sym, summary.card_paise as f64 / 100.0)),
         ];
 
         for (i, (label, val)) in summary_metrics.iter().enumerate() {
             let row = 4 + i as u32;
-            worksheet.write_with_format(row, 0, *label, &data_format).map_err(|e| e.to_string())?;
+            worksheet.write_with_format(row, 0, label.as_str(), &data_format).map_err(|e| e.to_string())?;
             worksheet.write_with_format(row, 1, val.as_str(), &summary_val_format).map_err(|e| e.to_string())?;
         }
 
         // 3. Write Detailed Itemized Table
         let table_start_row = 15;
         let headers = [
-            "Date", "Bill #", "Time", "Cashier", "Device", "Product Code", "Product Name",
-            "Category", "Qty", "Unit Price (₹)", "Subtotal (₹)", "Discount (₹)",
-            "GST (₹)", "Total (₹)", "Payment Method", "Cash (₹)", "UPI (₹)", "Card (₹)", "Status"
+            "Date".to_string(), "Bill #".to_string(), "Time".to_string(), "Cashier".to_string(), "Device".to_string(),
+            "Product Code".to_string(), "Product Name".to_string(), "Category".to_string(), "Qty".to_string(),
+            format!("Unit Price ({})", currency_sym),
+            format!("Subtotal ({})", currency_sym),
+            format!("Discount ({})", currency_sym),
+            format!("GST ({})", currency_sym),
+            format!("Total ({})", currency_sym),
+            "Payment Method".to_string(),
+            format!("Cash ({})", currency_sym),
+            format!("UPI ({})", currency_sym),
+            format!("Card ({})", currency_sym),
+            "Status".to_string(),
         ];
 
         for (col, header) in headers.iter().enumerate() {
-            worksheet.write_with_format(table_start_row, col as u16, *header, &header_format).map_err(|e| e.to_string())?;
+            worksheet.write_with_format(table_start_row, col as u16, header.as_str(), &header_format).map_err(|e| e.to_string())?;
         }
 
         for (i, row_data) in rows.iter().enumerate() {

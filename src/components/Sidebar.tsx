@@ -48,7 +48,7 @@ export const Sidebar: React.FC = () => {
             />
           </div>
         ) : (
-          <div className="w-10 h-10 rounded-lg bg-primary-600 flex items-center justify-center text-white font-bold text-base shadow-sm flex-shrink-0">
+          <div className="w-10 h-10 rounded-lg bg-primary-700 flex items-center justify-center text-white font-bold text-base shadow-sm flex-shrink-0">
             {shopName ? shopName.charAt(0).toUpperCase() : 'B'}
           </div>
         )}
@@ -200,7 +200,7 @@ export const Sidebar: React.FC = () => {
               <span>{user?.display_name}</span>
               {isAdmin && (
                 <span title="Admin">
-                  <ShieldCheck className="w-4 h-4 text-primary-600 inline" />
+                  <ShieldCheck className="w-4 h-4 text-primary-700 inline" />
                 </span>
               )}
             </div>
